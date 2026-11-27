@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "core-jobs",
+    "core-image",
+    "core-pdf",
+    "core-media",
+    "core-archive",
+    "core-convert",
+    "core-ai",
+    "bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/musamusakannike/tool-center"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
