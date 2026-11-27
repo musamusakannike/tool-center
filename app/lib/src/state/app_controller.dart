@@ -10,6 +10,8 @@ import '../services/core_service.dart';
 class AppController extends ChangeNotifier {
   static const _prefsThemeKey = 'tool_center.theme_mode';
   static const _prefsRecentKey = 'tool_center.recent_files';
+  static const _prefsAiCustomDirKey = 'tool_center.ai_custom_dir';
+  static const _prefsAiDevicePrefKey = 'tool_center.ai_device_pref';
 
   final ToolCenterBackend backend;
 
@@ -17,15 +19,21 @@ class AppController extends ChangeNotifier {
   List<ToolDescriptorModel> _tools = const [];
   final List<JobSnapshotModel> _jobs = [];
   List<String> _recentFiles = [];
+  AiModelsCatalogModel? _aiCatalog;
+  String? _savedCustomAiDir;
+  String _savedAiDevicePref = 'auto';
+
   ToolCategoryId? _selectedCategory;
   String _searchQuery = '';
   ToolDescriptorModel? _activeTool;
   List<String> _activeToolInitialFiles = const [];
   String? _previewFilePath;
+  bool _modelsScreenOpen = false;
   bool _jobsDrawerOpen = false;
   bool _ready = false;
   String? _startupError;
   StreamSubscription<JobSnapshotModel>? _jobEventsSub;
+  StreamSubscription<AiModelsCatalogModel>? _aiEventsSub;
 
   AppController({required this.backend});
 
@@ -33,16 +41,23 @@ class AppController extends ChangeNotifier {
   List<ToolDescriptorModel> get tools => _tools;
   List<JobSnapshotModel> get jobs => List.unmodifiable(_jobs);
   List<String> get recentFiles => List.unmodifiable(_recentFiles);
+  AiModelsCatalogModel? get aiCatalog => _aiCatalog;
   ToolCategoryId? get selectedCategory => _selectedCategory;
   String get searchQuery => _searchQuery;
   ToolDescriptorModel? get activeTool => _activeTool;
   List<String> get activeToolInitialFiles => _activeToolInitialFiles;
   String? get previewFilePath => _previewFilePath;
+  bool get modelsScreenOpen => _modelsScreenOpen;
   bool get jobsDrawerOpen => _jobsDrawerOpen;
   bool get ready => _ready;
   String? get startupError => _startupError;
 
   int get activeJobCount => _jobs.where((j) => j.status.isActive).length;
+  int get activeModelDownloadCount =>
+      _aiCatalog?.models
+          .where((m) => m.state == ModelInstallStateId.downloading)
+          .length ??
+      0;
 
   List<ToolDescriptorModel> get filteredTools {
     return _tools.where((tool) {
@@ -62,6 +77,17 @@ class AppController extends ChangeNotifier {
         ..clear()
         ..addAll(backend.listJobs());
       _jobEventsSub = backend.subscribeJobSnapshots().listen(_onJobSnapshot);
+      _aiEventsSub = backend.subscribeAiCatalog().listen(_onAiCatalogUpdate);
+
+      if (_savedAiDevicePref != 'auto') {
+        backend.setAiDevicePreference(_savedAiDevicePref);
+      }
+      if (_savedCustomAiDir != null && _savedCustomAiDir!.isNotEmpty) {
+        try {
+          await backend.setAiModelsDir(_savedCustomAiDir);
+        } catch (_) {}
+      }
+      _aiCatalog = await backend.getAiCatalog();
       _ready = true;
 
       // Support OS "Open With" CLI arguments
@@ -95,9 +121,67 @@ class AppController extends ChangeNotifier {
         _themeMode = ThemeMode.system;
       }
       _recentFiles = prefs.getStringList(_prefsRecentKey) ?? [];
+      _savedCustomAiDir = prefs.getString(_prefsAiCustomDirKey);
+      _savedAiDevicePref = prefs.getString(_prefsAiDevicePrefKey) ?? 'auto';
     } catch (_) {
       // Non-fatal if preferences are unavailable in headless environments
     }
+  }
+
+  Future<void> refreshAiCatalog() async {
+    try {
+      _aiCatalog = await backend.getAiCatalog();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> startModelDownload(String modelId) async {
+    await backend.startAiModelDownload(modelId);
+    await refreshAiCatalog();
+  }
+
+  void cancelModelDownload(String modelId) {
+    backend.cancelAiModelDownload(modelId);
+    unawaited(refreshAiCatalog());
+  }
+
+  Future<void> removeModel(String modelId) async {
+    await backend.deleteAiModel(modelId);
+    await refreshAiCatalog();
+  }
+
+  Future<void> importModelFromPath({
+    required String modelId,
+    required String sourcePath,
+  }) async {
+    await backend.importAiModel(modelId: modelId, sourcePath: sourcePath);
+    await refreshAiCatalog();
+  }
+
+  Future<void> setCustomAiModelsDir(String? dirPath) async {
+    await backend.setAiModelsDir(dirPath);
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(milliseconds: 250),
+      );
+      if (dirPath == null || dirPath.isEmpty) {
+        await prefs.remove(_prefsAiCustomDirKey);
+      } else {
+        await prefs.setString(_prefsAiCustomDirKey, dirPath);
+      }
+    } catch (_) {}
+    await refreshAiCatalog();
+  }
+
+  Future<void> setAiDevicePreference(String pref) async {
+    backend.setAiDevicePreference(pref);
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(milliseconds: 250),
+      );
+      await prefs.setString(_prefsAiDevicePrefKey, pref);
+    } catch (_) {}
+    await refreshAiCatalog();
   }
 
   Future<void> cycleThemeMode() async {
@@ -130,6 +214,7 @@ class AppController extends ChangeNotifier {
     ToolDescriptorModel tool, {
     List<String> initialFiles = const [],
   }) {
+    _modelsScreenOpen = false;
     _previewFilePath = null;
     _activeTool = tool;
     _activeToolInitialFiles = List<String>.from(initialFiles);
@@ -140,6 +225,7 @@ class AppController extends ChangeNotifier {
   }
 
   void openPreview(String filePath) {
+    _modelsScreenOpen = false;
     _activeTool = null;
     _activeToolInitialFiles = const [];
     _previewFilePath = filePath;
@@ -147,7 +233,17 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void openModelsScreen() {
+    _modelsScreenOpen = true;
+    _activeTool = null;
+    _activeToolInitialFiles = const [];
+    _previewFilePath = null;
+    unawaited(refreshAiCatalog());
+    notifyListeners();
+  }
+
   void goHome() {
+    _modelsScreenOpen = false;
     _activeTool = null;
     _activeToolInitialFiles = const [];
     _previewFilePath = null;
@@ -219,9 +315,15 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onAiCatalogUpdate(AiModelsCatalogModel catalog) {
+    _aiCatalog = catalog;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _jobEventsSub?.cancel();
+    _aiEventsSub?.cancel();
     super.dispose();
   }
 }

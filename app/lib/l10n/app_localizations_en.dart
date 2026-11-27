@@ -49,6 +49,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get categoryAll => 'All Tools';
 
   @override
+  String get categoryAi => 'AI';
+
+  @override
   String get categoryImages => 'Images';
 
   @override
@@ -121,14 +124,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resultsStep => '3. Results';
 
   @override
-  String get aiModelsButton => 'AI Models (v2)';
+  String get aiModelsButton => 'Models';
 
   @override
-  String get aiModelsDialogTitle => 'On-Demand AI Model Manager (v2 Preview)';
+  String get aiModelsDialogTitle => 'AI Models & Runtime';
 
   @override
   String get aiModelsDialogSubtitle =>
-      'Models are never bundled. Only permissive (MIT / Apache-2.0) ONNX models are permitted.';
+      'Models are never bundled in the installer. Download on demand or import offline — verified with SHA-256 and restricted to permissive (MIT / Apache-2.0 / BSD) licenses.';
 
   @override
   String get themeTooltip => 'Switch theme (System / Light / Dark)';

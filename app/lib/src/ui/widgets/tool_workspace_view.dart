@@ -10,6 +10,7 @@ import '../../models/tool_models.dart';
 import '../../services/core_service.dart';
 import '../../state/app_controller.dart';
 import '../theme/app_theme.dart';
+import 'models_view.dart';
 import 'schema_options_form.dart';
 
 class ToolWorkspaceView extends StatefulWidget {
@@ -60,6 +61,20 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
     if (id == null) return null;
     for (final j in widget.controller.jobs) {
       if (j.jobId == id) return j;
+    }
+    return null;
+  }
+
+  AiModelStatusModel? get _missingRequiredModel {
+    final selectedModelId = _optionValues['model_id']?.toString();
+    if (selectedModelId == null ||
+        selectedModelId.isEmpty ||
+        selectedModelId == 'lanczos_fallback') {
+      return null;
+    }
+    final status = widget.controller.aiCatalog?.findById(selectedModelId);
+    if (status != null && !status.installed) {
+      return status;
     }
     return null;
   }
@@ -489,6 +504,14 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                   const SizedBox(height: 16),
                 ],
 
+                if (_missingRequiredModel != null) ...[
+                  MissingModelPromptCard(
+                    model: _missingRequiredModel!,
+                    controller: widget.controller,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
                 // Run / Cancel Action Row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -503,7 +526,9 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                       const SizedBox(width: 12),
                     ],
                     FilledButton.icon(
-                      onPressed: isRunning || _selectedPaths.isEmpty
+                      onPressed: isRunning ||
+                              _selectedPaths.isEmpty ||
+                              _missingRequiredModel != null
                           ? null
                           : _runTool,
                       icon: isRunning

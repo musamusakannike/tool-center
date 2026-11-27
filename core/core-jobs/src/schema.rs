@@ -6,6 +6,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCategory {
+    Ai,
     Images,
     Video,
     Audio,
@@ -17,6 +18,7 @@ pub enum ToolCategory {
 impl ToolCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Ai => "ai",
             Self::Images => "images",
             Self::Video => "video",
             Self::Audio => "audio",

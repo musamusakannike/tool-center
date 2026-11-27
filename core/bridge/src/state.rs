@@ -1,10 +1,12 @@
+use core_ai::AiRuntimeHub;
 use core_jobs::{JobManager, ToolRegistry};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tokio::runtime::Runtime;
 
 pub struct EngineState {
     pub runtime: Runtime,
     pub jobs: JobManager,
+    pub ai: Arc<AiRuntimeHub>,
 }
 
 static ENGINE: OnceLock<EngineState> = OnceLock::new();
@@ -18,13 +20,19 @@ pub fn engine() -> &'static EngineState {
             .build()
             .expect("Failed to initialize Tokio background runtime");
 
+        let default_ai_dir = std::env::temp_dir().join("tool_center_ai_models");
+        let ai = Arc::new(
+            AiRuntimeHub::new(default_ai_dir)
+                .expect("Embedded models.json failed integrity/license validation"),
+        );
+
         let registry = build_default_registry();
         let concurrency = std::thread::available_parallelism()
             .map(|n| n.get().clamp(2, 8))
             .unwrap_or(4);
         let jobs = JobManager::new(registry, concurrency);
 
-        EngineState { runtime, jobs }
+        EngineState { runtime, jobs, ai }
     })
 }
 

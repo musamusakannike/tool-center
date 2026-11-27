@@ -166,6 +166,12 @@ abstract class AppLocalizations {
   /// **'All Tools'**
   String get categoryAll;
 
+  /// No description provided for @categoryAi.
+  ///
+  /// In en, this message translates to:
+  /// **'AI'**
+  String get categoryAi;
+
   /// No description provided for @categoryImages.
   ///
   /// In en, this message translates to:
@@ -313,19 +319,19 @@ abstract class AppLocalizations {
   /// No description provided for @aiModelsButton.
   ///
   /// In en, this message translates to:
-  /// **'AI Models (v2)'**
+  /// **'Models'**
   String get aiModelsButton;
 
   /// No description provided for @aiModelsDialogTitle.
   ///
   /// In en, this message translates to:
-  /// **'On-Demand AI Model Manager (v2 Preview)'**
+  /// **'AI Models & Runtime'**
   String get aiModelsDialogTitle;
 
   /// No description provided for @aiModelsDialogSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Models are never bundled. Only permissive (MIT / Apache-2.0) ONNX models are permitted.'**
+  /// **'Models are never bundled in the installer. Download on demand or import offline — verified with SHA-256 and restricted to permissive (MIT / Apache-2.0 / BSD) licenses.'**
   String get aiModelsDialogSubtitle;
 
   /// No description provided for @themeTooltip.

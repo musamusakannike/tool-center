@@ -122,4 +122,76 @@ void main() {
       expect(find.text('Lagos'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'Models screen displays size before downloading and AI tool shows one-click Download Model prompt',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      const sampleAiTool = ToolDescriptorModel(
+        id: 'ai.remove_bg',
+        name: 'Remove Background',
+        nameKey: 'tool_ai_remove_bg',
+        description: 'Cut out subjects cleanly offline.',
+        descriptionKey: 'tool_ai_remove_bg_desc',
+        category: ToolCategoryId.ai,
+        icon: 'auto_fix_high',
+        keywords: ['matting', 'cutout'],
+        inputSpec: ToolInputSpecModel(
+          acceptedExtensions: ['png', 'jpg'],
+          minFiles: 1,
+          maxFiles: null,
+          allowDirectories: false,
+        ),
+        optionsSchema: [
+          OptionFieldModel(
+            key: 'model_id',
+            label: 'AI Model',
+            labelKey: 'opt_ai_model',
+            hint: 'Choose fast or high-detail matting.',
+            hintKey: 'opt_ai_model_hint',
+            kindType: OptionKindType.select,
+            choices: [
+              SelectChoiceModel(
+                value: 'bg.u2netp',
+                label: 'U²-Netp (Fast)',
+              ),
+            ],
+            defaultValue: 'bg.u2netp',
+          ),
+        ],
+        defaultSuffix: '_nobg',
+      );
+
+      final backend = FakeToolCenterBackend(tools: [sampleTool, sampleAiTool]);
+      final controller = AppController(backend: backend);
+      await controller.initialize();
+
+      await tester.pumpWidget(ToolCenterApp(controller: controller));
+      await tester.pumpAndSettle();
+
+      // 1. Open AI tool whose model (`bg.u2netp`) is not yet installed -> shows exact size prompt!
+      controller.openTool(sampleAiTool, initialFiles: const ['/tmp/photo.png']);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Model required: U²-Netp (Fast General & Portrait)'),
+        findsOneWidget,
+      );
+      expect(find.text('Download Model (4.4 MB)'), findsOneWidget);
+
+      // 2. Open dedicated Models screen -> shows sizes, statuses, and Install/Remove buttons
+      await tester.tap(find.text('Models'));
+      await tester.pumpAndSettle();
+      expect(find.text('AI Models & Runtime'), findsOneWidget);
+      expect(find.text('Download (4.4 MB)'), findsOneWidget);
+      expect(find.text('Remove'), findsOneWidget);
+
+      // 3. Click Download (4.4 MB) -> transitions to Ready!
+      await tester.tap(find.text('Download (4.4 MB)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Download (4.4 MB)'), findsNothing);
+    },
+  );
 }

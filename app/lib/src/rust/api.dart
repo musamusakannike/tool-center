@@ -85,11 +85,50 @@ Future<int> getPdfPageCount({required String path, String? password}) => RustLib
     .api
     .crateApiGetPdfPageCount(path: path, password: password);
 
-/// Returns the v2 permissive-licensed ONNX model catalog, cache status, and excluded non-commercial models.
+/// Returns the v2 permissive-licensed ONNX model catalog, settings, live download state, and excluded models.
 Future<String> listAiModelsJson({required String cacheDir}) =>
     RustLib.instance.api.crateApiListAiModelsJson(cacheDir: cacheDir);
 
-/// Deletes a cached on-demand ONNX model file from disk.
+/// Streams real-time AI model catalog & download progress updates to Flutter without polling.
+Stream<String> subscribeAiModelEvents() =>
+    RustLib.instance.api.crateApiSubscribeAiModelEvents();
+
+/// Starts a resumable, SHA-256-verified background download for `model_id`.
+Future<void> startAiModelDownload({
+  required String cacheDir,
+  required String modelId,
+}) => RustLib.instance.api.crateApiStartAiModelDownload(
+  cacheDir: cacheDir,
+  modelId: modelId,
+);
+
+/// Cancels an active model download (keeping `.part` bytes on disk for instant resume).
+bool cancelAiModelDownload({required String modelId}) =>
+    RustLib.instance.api.crateApiCancelAiModelDownload(modelId: modelId);
+
+/// Sets or resets a custom model storage directory.
+Future<String> setAiModelsDir({required String cacheDir, String? customDir}) =>
+    RustLib.instance.api.crateApiSetAiModelsDir(
+      cacheDir: cacheDir,
+      customDir: customDir,
+    );
+
+/// Sets the ONNX Runtime hardware execution provider preference (`auto`, `cpu`, `coreml`, `directml`, `cuda`).
+void setAiDevicePreference({required String preference}) =>
+    RustLib.instance.api.crateApiSetAiDevicePreference(preference: preference);
+
+/// Manually imports a local `.onnx` file or model pack directory for offline machines after verifying SHA-256.
+Future<String> importAiModelPath({
+  required String cacheDir,
+  required String modelId,
+  required String sourcePath,
+}) => RustLib.instance.api.crateApiImportAiModelPath(
+  cacheDir: cacheDir,
+  modelId: modelId,
+  sourcePath: sourcePath,
+);
+
+/// Deletes an installed or partially downloaded AI model from disk.
 Future<bool> deleteAiModel({
   required String cacheDir,
   required String modelId,

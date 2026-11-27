@@ -9,10 +9,10 @@ import 'l10n/app_localizations.dart';
 import 'src/services/core_service.dart';
 import 'src/state/app_controller.dart';
 import 'src/ui/theme/app_theme.dart';
-import 'src/ui/widgets/ai_models_dialog.dart';
 import 'src/ui/widgets/command_palette_dialog.dart';
 import 'src/ui/widgets/home_view.dart';
 import 'src/ui/widgets/jobs_drawer_panel.dart';
+import 'src/ui/widgets/models_view.dart';
 import 'src/ui/widgets/preview_view.dart';
 import 'src/ui/widgets/tool_workspace_view.dart';
 
@@ -110,6 +110,7 @@ class _ToolCenterShell extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final activeCount = controller.activeJobCount;
+    final activeDownloads = controller.activeModelDownloadCount;
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -202,7 +203,8 @@ class _ToolCenterShell extends StatelessWidget {
                       ),
                       onChanged: (q) {
                         if (controller.activeTool != null ||
-                            controller.previewFilePath != null) {
+                            controller.previewFilePath != null ||
+                            controller.modelsScreenOpen) {
                           controller.goHome();
                         }
                         controller.setSearchQuery(q);
@@ -216,13 +218,19 @@ class _ToolCenterShell extends StatelessWidget {
                   icon: const Icon(Icons.terminal_rounded),
                   onPressed: () => _openPalette(context),
                 ),
-                TextButton.icon(
-                  onPressed: () => showAiModelsDialog(
-                    context: context,
-                    backend: controller.backend,
+                Badge(
+                  isLabelVisible: activeDownloads > 0,
+                  label: Text('$activeDownloads'),
+                  child: TextButton.icon(
+                    onPressed: controller.openModelsScreen,
+                    icon: Icon(
+                      controller.modelsScreenOpen
+                          ? Icons.auto_awesome_rounded
+                          : Icons.auto_awesome_outlined,
+                      size: 18,
+                    ),
+                    label: Text(l10n.aiModelsButton),
                   ),
-                  icon: const Icon(Icons.auto_awesome_outlined, size: 18),
-                  label: Text(l10n.aiModelsButton),
                 ),
                 Badge(
                   isLabelVisible: activeCount > 0,
@@ -259,6 +267,9 @@ class _ToolCenterShell extends StatelessWidget {
   }
 
   Widget _buildActiveBody() {
+    if (controller.modelsScreenOpen) {
+      return ModelsView(controller: controller);
+    }
     if (controller.previewFilePath != null) {
       return FilePreviewView(
         controller: controller,
