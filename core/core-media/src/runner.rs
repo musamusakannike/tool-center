@@ -117,7 +117,7 @@ pub fn select_webm_video_encoder() -> Option<(&'static str, Vec<String>)> {
     }
 }
 
-/// Selects an LGPL-compatible Ogg audio encoder (`libvorbis`, `libopus`, or built-in `vorbis` with `-strict -2`).
+/// Selects an LGPL-compatible Ogg audio encoder (`libvorbis`, `libopus`, or built-in `vorbis` with `-strict -2 -ac 2`).
 pub fn select_ogg_audio_encoder() -> (&'static str, Vec<String>) {
     let encs = available_ffmpeg_encoders();
     if encs.contains("libvorbis") {
@@ -125,7 +125,10 @@ pub fn select_ogg_audio_encoder() -> (&'static str, Vec<String>) {
     } else if encs.contains("libopus") {
         ("libopus", Vec::new())
     } else {
-        ("vorbis", vec!["-strict".into(), "-2".into()])
+        (
+            "vorbis",
+            vec!["-strict".into(), "-2".into(), "-ac".into(), "2".into()],
+        )
     }
 }
 
