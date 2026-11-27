@@ -22,8 +22,8 @@ pub use manifest::{
 };
 pub use ocr::{AiOcrTool, OcrPageReport, OcrRegionItem};
 pub use runtime::{
-    ensure_ort_environment, locate_onnxruntime_dylib, query_available_providers,
-    ActiveProviderInfo, OrtSessionHandle, SessionPool,
+    ensure_ort_environment, is_ort_environment_loaded, locate_onnxruntime_dylib,
+    query_available_providers, ActiveProviderInfo, OrtSessionHandle, SessionPool,
 };
 pub use upscale::{select_auto_tile_size, AiUpscaleTool, LANCZOS_FALLBACK_ID};
 
@@ -825,6 +825,80 @@ mod tests {
         assert!(
             has_image_xobject,
             "Searchable PDF must preserve full-page scan image XObject"
+        );
+    }
+
+    #[test]
+    #[ignore = "Downloads real multi-MB ONNX weights from upstream; run manually or via ai-models-nightly.yml"]
+    fn real_model_download_and_inference_smoke() {
+        use core_jobs::{Tool, ToolContext, ToolOptions};
+        use image::{ImageBuffer, Rgba};
+        use serde_json::json;
+        use std::sync::Arc;
+
+        let dir = tempdir().unwrap();
+        let hub = Arc::new(AiRuntimeHub::new(dir.path().join("models")).unwrap());
+        let mgr = hub.manager().unwrap();
+        let transport = HttpModelTransport;
+
+        // 1. Download real U²-Netp (4.4 MB) & verify SHA-256, then run background removal
+        mgr.download_model("bg.u2netp", &transport, &CancelHandle::new(), |_, _, _| {})
+            .unwrap();
+        let img_path = dir.path().join("real_smoke.png");
+        let mut img = ImageBuffer::from_pixel(256, 256, Rgba([20u8, 25, 30, 255]));
+        for y in 64..192 {
+            for x in 64..192 {
+                img.put_pixel(x, y, Rgba([240, 220, 200, 255]));
+            }
+        }
+        img.save(&img_path).unwrap();
+
+        let bg_tool = AiRemoveBgTool::new(Arc::clone(&hub));
+        let mut bg_opts = ToolOptions::new();
+        bg_opts.insert("model_id", json!("bg.u2netp"));
+        let bg_ctx = ToolContext::new(
+            "smoke-bg",
+            vec![img_path.clone()],
+            bg_opts,
+            None,
+            CancelHandle::new(),
+            Arc::new(|_, _| {}),
+        );
+        let bg_res = bg_tool.run(&bg_ctx).unwrap();
+        assert!(Path::new(&bg_res.outputs[0].path).exists());
+
+        // 2. Download real PP-OCRv4 English pack (10.2 MB) & verify SHA-256, then run OCR
+        mgr.download_model(
+            "ocr.ppocr_v4_en",
+            &transport,
+            &CancelHandle::new(),
+            |_, _, _| {},
+        )
+        .unwrap();
+        let pdf_path = dir.path().join("smoke_doc.pdf");
+        fs::write(
+            &pdf_path,
+            core_pdf::create_minimal_pdf_bytes(&["TOOL CENTER OFFLINE OCR 2026"]),
+        )
+        .unwrap();
+
+        let ocr_tool = AiOcrTool::new(Arc::clone(&hub));
+        let mut ocr_opts = ToolOptions::new();
+        ocr_opts.insert("model_id", json!("ocr.ppocr_v4_en"));
+        ocr_opts.insert("output_format", json!("txt"));
+        let ocr_ctx = ToolContext::new(
+            "smoke-ocr",
+            vec![pdf_path],
+            ocr_opts,
+            None,
+            CancelHandle::new(),
+            Arc::new(|_, _| {}),
+        );
+        let ocr_res = ocr_tool.run(&ocr_ctx).unwrap();
+        let recognized = fs::read_to_string(&ocr_res.outputs[0].path).unwrap();
+        assert!(
+            recognized.to_uppercase().contains("TOOL"),
+            "Real PP-OCRv4 must recognize 'TOOL', got: {recognized}"
         );
     }
 }

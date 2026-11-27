@@ -36,7 +36,7 @@ pub fn engine() -> &'static EngineState {
             }
         });
 
-        let registry = build_default_registry();
+        let registry = build_default_registry(&ai);
         let concurrency = std::thread::available_parallelism()
             .map(|n| n.get().clamp(2, 8))
             .unwrap_or(4);
@@ -46,8 +46,9 @@ pub fn engine() -> &'static EngineState {
     })
 }
 
-fn build_default_registry() -> ToolRegistry {
+fn build_default_registry(ai: &Arc<AiRuntimeHub>) -> ToolRegistry {
     let registry = ToolRegistry::new();
+    core_ai::register_ai_tools(&registry, ai);
     core_image::register_image_tools(&registry);
     core_pdf::register_pdf_tools(&registry);
     core_media::register_media_tools(&registry);

@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Fetch & verify pinned LGPL FFmpeg and PDFium binaries
+      - name: Fetch & verify pinned LGPL FFmpeg, PDFium, and ONNX Runtime binaries
         run: python scripts/fetch_vendor.py
 
       - name: Install Rust toolchain
@@ -110,4 +110,5 @@ jobs:
           cp core/target/release/libbridge.dylib "${APP_BUNDLE}/Contents/Frameworks/"
           VENDOR_MAC=$(ls -d vendor/macos-* | head -n 1)
           cp "${VENDOR_MAC}/pdfium/lib/libpdfium.dylib" "${APP_BUNDLE}/Contents/Frameworks/"
+          cp "${VENDOR_MAC}/onnxruntime/lib/libonnxruntime.dylib" "${APP_BUNDLE}/Contents/Frameworks/"
           cp -R "${VENDOR_MAC}/ffmpeg" "${APP_BUNDLE}/Contents/Resources/ffmpeg"

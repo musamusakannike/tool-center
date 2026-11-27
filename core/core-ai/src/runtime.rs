@@ -14,6 +14,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static ORT_ENVIRONMENT: OnceLock<Result<Environment, String>> = OnceLock::new();
 
+/// Returns `true` only after ONNX Runtime has been lazily loaded into the process.
+pub fn is_ort_environment_loaded() -> bool {
+    ORT_ENVIRONMENT.get().is_some()
+}
+
 fn now_epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

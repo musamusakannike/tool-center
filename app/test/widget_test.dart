@@ -192,6 +192,12 @@ void main() {
       await tester.tap(find.text('Download (4.4 MB)'));
       await tester.pumpAndSettle();
       expect(find.text('Download (4.4 MB)'), findsNothing);
+
+      // 4. Previewing a PNG image surfaces contextual "AI Actions" (Remove Background) even with >8 tools
+      controller.openPreview('/tmp/photo.png');
+      await tester.pumpAndSettle();
+      expect(find.text('AI Actions'), findsOneWidget);
+      expect(find.text('Remove Background'), findsOneWidget);
     },
   );
 }

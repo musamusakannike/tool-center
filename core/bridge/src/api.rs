@@ -270,9 +270,13 @@ mod tests {
         assert_eq!(core_version(), "0.1.0");
         let tools_raw = list_tools_json();
         let tools: Vec<serde_json::Value> = serde_json::from_str(&tools_raw).unwrap();
-        assert_eq!(tools.len(), 38, "Expected all 38 v1 tools to be registered");
+        assert_eq!(
+            tools.len(),
+            41,
+            "Expected all 38 v1 tools + 3 v2 AI tools (41 total) to be registered"
+        );
 
-        for cat in ["images", "video", "audio", "pdf", "files", "convert"] {
+        for cat in ["ai", "images", "video", "audio", "pdf", "files", "convert"] {
             assert!(
                 tools.iter().any(|t| t["category"] == cat),
                 "Missing tools in category {cat}"
@@ -294,6 +298,12 @@ mod tests {
             }
         }
         assert!(list_jobs_json().starts_with('['));
+
+        // Cold-start performance guard: listing all 41 tools must NEVER eagerly load ONNX Runtime!
+        assert!(
+            !core_ai::is_ort_environment_loaded(),
+            "ONNX Runtime must remain unloaded at startup and idle until an AI job runs"
+        );
     }
 
     #[tokio::test]
@@ -326,5 +336,9 @@ mod tests {
         let json = list_ai_models_json(dir.display().to_string()).unwrap();
         assert!(json.contains("Apache-2.0"));
         assert!(json.contains("flagged_excluded"));
+        assert!(
+            !core_ai::is_ort_environment_loaded(),
+            "Listing AI model catalog must not eagerly load ONNX Runtime"
+        );
     }
 }

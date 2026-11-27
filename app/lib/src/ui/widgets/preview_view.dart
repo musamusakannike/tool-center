@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../models/preview_models.dart';
+import '../../models/tool_models.dart';
 import '../../services/core_service.dart';
 import '../../state/app_controller.dart';
 import '../theme/app_theme.dart';
@@ -871,7 +872,46 @@ class _MetadataSidebar extends StatelessWidget {
             ),
             const Divider(),
           ],
-          if (compatibleTools.isNotEmpty) ...[
+          if (compatibleTools
+              .any((t) => t.category == ToolCategoryId.ai)) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 16,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'AI Actions',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (final tool in compatibleTools
+                .where((t) => t.category == ToolCategoryId.ai))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    alignment: Alignment.centerLeft,
+                  ),
+                  onPressed: () =>
+                      controller.openTool(tool, initialFiles: [info.path]),
+                  icon: Icon(resolveToolIcon(tool.icon), size: 18),
+                  label: Text(
+                    _contextualAiActionLabel(tool),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+          ],
+          if (compatibleTools
+              .any((t) => t.category != ToolCategoryId.ai)) ...[
             const SizedBox(height: 16),
             Text(
               l10n.compatibleToolsTitle,
@@ -880,7 +920,9 @@ class _MetadataSidebar extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            for (final tool in compatibleTools.take(8))
+            for (final tool in compatibleTools
+                .where((t) => t.category != ToolCategoryId.ai)
+                .take(8))
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: OutlinedButton.icon(
@@ -897,6 +939,19 @@ class _MetadataSidebar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _contextualAiActionLabel(ToolDescriptorModel tool) {
+    switch (tool.id) {
+      case 'ai.ocr':
+        return 'Run OCR';
+      case 'ai.remove_bg':
+        return 'Remove Background';
+      case 'ai.upscale':
+        return 'Upscale';
+      default:
+        return tool.name;
+    }
   }
 }
 
