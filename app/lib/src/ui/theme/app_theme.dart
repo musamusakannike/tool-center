@@ -149,6 +149,12 @@ IconData resolveToolIcon(String iconName) {
       return Icons.file_copy_outlined;
     case 'swap':
       return Icons.swap_horiz_rounded;
+    case 'bg_remove':
+      return Icons.auto_fix_high_rounded;
+    case 'upscale':
+      return Icons.hd_outlined;
+    case 'ocr':
+      return Icons.document_scanner_outlined;
     default:
       return Icons.handyman_outlined;
   }

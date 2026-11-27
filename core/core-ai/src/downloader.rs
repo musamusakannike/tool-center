@@ -641,6 +641,16 @@ pub struct AiRuntimeHub {
 impl AiRuntimeHub {
     pub fn new(default_dir: PathBuf) -> Result<Self, AiModelError> {
         let manifest = ModelsManifest::load_from_path_or_embedded(None)?;
+        Self::with_manifest(default_dir, manifest)
+    }
+
+    pub fn with_manifest(
+        default_dir: PathBuf,
+        manifest: ModelsManifest,
+    ) -> Result<Self, AiModelError> {
+        for spec in &manifest.models {
+            spec.validate()?;
+        }
         let (events_tx, _) = broadcast::channel(256);
         Ok(Self {
             custom_models_dir: RwLock::new(None),
@@ -660,6 +670,73 @@ impl AiRuntimeHub {
 
     pub fn evict_idle_sessions(&self) -> usize {
         self.sessions.evict_idle_older_than(Duration::from_secs(60))
+    }
+
+    /// Resolves the verified on-disk path of a component file (`role`, e.g. `"primary"`, `"det"`,
+    /// `"cls"`, `"rec"`, `"dict"`) for `model_id`, returning an actionable user error if missing.
+    pub fn resolve_installed_component(
+        &self,
+        model_id: &str,
+        role: &str,
+    ) -> Result<(AiModelSpec, PathBuf), core_jobs::ToolError> {
+        let mgr = self.manager().map_err(|e| {
+            core_jobs::ToolError::failed("Cannot open AI model catalog", Some(e.to_string()))
+        })?;
+        let spec = mgr
+            .find_spec(model_id)
+            .ok_or_else(|| {
+                core_jobs::ToolError::invalid(format!(
+                    "Unknown AI model '{model_id}'. Please choose an available model."
+                ))
+            })?
+            .clone();
+
+        if !mgr.is_spec_installed(&spec) {
+            return Err(core_jobs::ToolError::failed(
+                format!(
+                    "Model '{}' ({}) is not installed yet. Click 'Download Model ({})' or open Models to install it.",
+                    spec.display_name,
+                    spec.id,
+                    crate::manifest::format_human_bytes(spec.size_bytes)
+                ),
+                None,
+            ));
+        }
+
+        let files = spec.effective_files();
+        let matched = files
+            .iter()
+            .find(|f| f.role == role)
+            .or_else(|| {
+                if role == "primary" {
+                    files.first()
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                core_jobs::ToolError::failed(
+                    format!("Model '{}' is missing component role '{role}'.", spec.id),
+                    None,
+                )
+            })?;
+
+        let path = mgr.component_path(&spec.id, &matched.filename);
+        Ok((spec, path))
+    }
+
+    /// Lazily loads (or reuses from `SessionPool`) an ONNX Runtime session for `(model_id, role)`.
+    pub fn load_role_session(
+        &self,
+        model_id: &str,
+        role: &str,
+    ) -> Result<(AiModelSpec, Arc<crate::runtime::OrtSessionHandle>), core_jobs::ToolError> {
+        let (spec, onnx_path) = self.resolve_installed_component(model_id, role)?;
+        let session_key = format!("{model_id}:{role}");
+        let session =
+            self.sessions
+                .get_or_load(&session_key, &onnx_path, self.device_preference())?;
+        Ok((spec, session))
     }
 
     pub fn update_default_dir_if_unset(&self, default_dir: &Path) {

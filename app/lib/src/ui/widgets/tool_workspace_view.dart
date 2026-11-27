@@ -10,6 +10,7 @@ import '../../models/tool_models.dart';
 import '../../services/core_service.dart';
 import '../../state/app_controller.dart';
 import '../theme/app_theme.dart';
+import 'ai_result_widgets.dart';
 import 'models_view.dart';
 import 'schema_options_form.dart';
 
@@ -550,6 +551,7 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                   const SizedBox(height: 20),
                   _JobResultSection(
                     job: job,
+                    backend: widget.controller.backend,
                     onPreviewOutput: widget.controller.openPreview,
                   ),
                 ],
@@ -564,9 +566,14 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
 
 class _JobResultSection extends StatelessWidget {
   final JobSnapshotModel job;
+  final ToolCenterBackend backend;
   final ValueChanged<String> onPreviewOutput;
 
-  const _JobResultSection({required this.job, required this.onPreviewOutput});
+  const _JobResultSection({
+    required this.job,
+    required this.backend,
+    required this.onPreviewOutput,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -654,6 +661,13 @@ class _JobResultSection extends StatelessWidget {
                     style: TextStyle(color: Colors.amber.shade800),
                   ),
               ],
+              if (AiJobResultEnhancement.isAiVisualReport(job.reportJson)) ...[
+                const SizedBox(height: 16),
+                AiJobResultEnhancement(
+                  rawReportJson: job.reportJson!,
+                  backend: backend,
+                ),
+              ],
               if (job.outputs.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 for (final out in job.outputs)
@@ -683,7 +697,8 @@ class _JobResultSection extends StatelessWidget {
                     ),
                   ),
               ],
-              if (job.reportJson != null) ...[
+              if (job.reportJson != null &&
+                  !AiJobResultEnhancement.isAiVisualReport(job.reportJson)) ...[
                 const SizedBox(height: 12),
                 _StructuredReportView(rawJson: job.reportJson!),
               ],

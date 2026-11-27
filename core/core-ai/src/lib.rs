@@ -1,11 +1,13 @@
 //! v2 AI engine: versioned `models.json` manifest, permissive-license gate, resumable SHA-256
 //! downloader, manual offline model import, and ONNX Runtime (`ort`) inference foundation.
 
+pub mod bg_remove;
 pub mod downloader;
 pub mod manifest;
 pub mod onnx_fixture;
 pub mod runtime;
 
+pub use bg_remove::AiRemoveBgTool;
 pub use downloader::{
     sha256_file_streamed, AiModelsCatalogPayload, AiRuntimeHub, AiSettingsSnapshot,
     HttpModelTransport, ModelManager, ModelTransport, RangeRequest, ResumeMode,
@@ -351,5 +353,162 @@ mod tests {
         let evicted = pool.evict_idle_older_than(Duration::from_millis(1));
         assert_eq!(evicted, 3);
         assert_eq!(pool.cached_count(), 0);
+    }
+
+    #[test]
+    fn ai_remove_bg_preserves_full_resolution_and_supports_all_background_modes() {
+        use core_jobs::{Tool, ToolContext, ToolOptions};
+        use image::{ImageBuffer, Rgba};
+        use serde_json::json;
+        use std::sync::Arc;
+
+        let dir = tempdir().unwrap();
+        let models_dir = dir.path().join("models");
+        let work_dir = dir.path().join("work");
+        fs::create_dir_all(&work_dir).unwrap();
+
+        // Install synthetic matting ONNX fixture via SHA-256-verified offline import
+        let onnx_bytes = onnx_fixture::build_tiny_matting_onnx();
+        let sha = sha256_bytes(&onnx_bytes);
+        let staged_onnx = dir.path().join("u2netp_fixture.onnx");
+        fs::write(&staged_onnx, &onnx_bytes).unwrap();
+
+        let manifest = ModelsManifest {
+            schema_version: 1,
+            updated_at: "2026-11-27".into(),
+            models: vec![AiModelSpec {
+                id: "bg.u2netp".into(),
+                display_name: "U²-Netp Fixture".into(),
+                task: AiTask::BackgroundRemoval,
+                url: "https://example.com/u2netp.onnx".into(),
+                size_bytes: onnx_bytes.len() as u64,
+                sha256: sha.clone(),
+                license: "Apache-2.0".into(),
+                source_url: "https://github.com/xuebinqin/U-2-Net".into(),
+                attribution: "U-2-Net (Apache-2.0)".into(),
+                description: "Test fixture".into(),
+                default_for_task: true,
+                language: None,
+                scale: None,
+                files: vec![ModelFileEntry {
+                    role: "primary".into(),
+                    filename: "u2netp.onnx".into(),
+                    url: "https://example.com/u2netp.onnx".into(),
+                    size_bytes: onnx_bytes.len() as u64,
+                    sha256: sha,
+                }],
+            }],
+        };
+
+        let hub = Arc::new(AiRuntimeHub::with_manifest(models_dir, manifest).unwrap());
+        hub.manager()
+            .unwrap()
+            .import_offline_model("bg.u2netp", &staged_onnx)
+            .unwrap();
+
+        let tool = AiRemoveBgTool::new(Arc::clone(&hub));
+
+        // Create high-resolution non-square subject image (540×380 > 320×320 inference square!)
+        // Dark border -> low saliency (~0 alpha); bright center box -> high saliency (~1 alpha).
+        let src_img_path = work_dir.join("subject.png");
+        let mut img = ImageBuffer::from_pixel(540, 380, Rgba([10u8, 12, 15, 255]));
+        for y in 90..290 {
+            for x in 140..400 {
+                img.put_pixel(x, y, Rgba([245, 240, 235, 255]));
+            }
+        }
+        img.save(&src_img_path).unwrap();
+
+        let src_img_path_2 = work_dir.join("subject_batch2.png");
+        img.save(&src_img_path_2).unwrap();
+
+        let bg_replacement_path = work_dir.join("backdrop.png");
+        ImageBuffer::from_pixel(120, 90, Rgba([30u8, 140, 220, 255]))
+            .save(&bg_replacement_path)
+            .unwrap();
+
+        let make_ctx = |inputs: Vec<std::path::PathBuf>, opts: ToolOptions| {
+            ToolContext::new(
+                "test-bg",
+                inputs,
+                opts,
+                None,
+                CancelHandle::new(),
+                Arc::new(|_, _| {}),
+            )
+        };
+
+        // 1. Transparent PNG batch mode (2 inputs) -> preserves exact 540×380 resolution & transparent corners
+        let mut opts_trans = ToolOptions::new();
+        opts_trans.insert("model_id", json!("bg.u2netp"));
+        opts_trans.insert("bg_mode", json!("transparent"));
+        let res_trans = tool
+            .run(&make_ctx(
+                vec![src_img_path.clone(), src_img_path_2.clone()],
+                opts_trans,
+            ))
+            .unwrap();
+        assert_eq!(res_trans.outputs.len(), 2);
+        let out_trans = core_image::load_image_any(Path::new(&res_trans.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((out_trans.width(), out_trans.height()), (540, 380));
+        assert!(
+            out_trans.get_pixel(5, 5)[3] < 20,
+            "Dark background corner must become transparent"
+        );
+        assert!(
+            out_trans.get_pixel(270, 190)[3] > 235,
+            "Bright subject center must remain opaque"
+        );
+
+        // 2. Solid color mode (#108040)
+        let mut opts_solid = ToolOptions::new();
+        opts_solid.insert("model_id", json!("bg.u2netp"));
+        opts_solid.insert("bg_mode", json!("solid_color"));
+        opts_solid.insert("bg_color", json!("#108040"));
+        let res_solid = tool
+            .run(&make_ctx(vec![src_img_path.clone()], opts_solid))
+            .unwrap();
+        let out_solid = core_image::load_image_any(Path::new(&res_solid.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((out_solid.width(), out_solid.height()), (540, 380));
+        let corner_px = out_solid.get_pixel(5, 5);
+        assert!((corner_px[0] as i32 - 0x10).abs() <= 4);
+        assert!((corner_px[1] as i32 - 0x80).abs() <= 4);
+        assert_eq!(corner_px[3], 255);
+
+        // 3. Gaussian blur mode
+        let mut opts_blur = ToolOptions::new();
+        opts_blur.insert("model_id", json!("bg.u2netp"));
+        opts_blur.insert("bg_mode", json!("blur"));
+        opts_blur.insert("blur_sigma", json!(12));
+        let res_blur = tool
+            .run(&make_ctx(vec![src_img_path.clone()], opts_blur))
+            .unwrap();
+        let out_blur = core_image::load_image_any(Path::new(&res_blur.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((out_blur.width(), out_blur.height()), (540, 380));
+        assert_eq!(out_blur.get_pixel(270, 190)[3], 255);
+
+        // 4. Custom background image mode
+        let mut opts_img = ToolOptions::new();
+        opts_img.insert("model_id", json!("bg.u2netp"));
+        opts_img.insert("bg_mode", json!("custom_image"));
+        opts_img.insert(
+            "bg_image_path",
+            json!(bg_replacement_path.display().to_string()),
+        );
+        let res_img = tool
+            .run(&make_ctx(vec![src_img_path.clone()], opts_img))
+            .unwrap();
+        let out_img = core_image::load_image_any(Path::new(&res_img.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((out_img.width(), out_img.height()), (540, 380));
+        let bg_corner = out_img.get_pixel(5, 5);
+        assert!((bg_corner[2] as i32 - 220).abs() <= 6);
     }
 }

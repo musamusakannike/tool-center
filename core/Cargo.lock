@@ -496,7 +496,9 @@ dependencies = [
 name = "core-ai"
 version = "0.1.0"
 dependencies = [
+ "core-image",
  "core-jobs",
+ "image",
  "ort",
  "serde",
  "serde_json",
