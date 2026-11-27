@@ -32,7 +32,7 @@ Comment=Fast, offline file preview, conversion, and manipulation toolbox
 Exec=tool_center %f
 Icon=io.toolcenter.tool_center
 Terminal=false
-Categories=Utility;FileTools;AudioVideo;Graphics;
+Categories=Utility;FileTools;
 StartupWMClass=io.toolcenter.tool_center
 "
 
@@ -79,8 +79,21 @@ echo "Built Debian package: ${DEB_OUT}"
 # 2. Build AppImage (if --skip-appimage is not passed)
 # ---------------------------------------------------------------------------
 if [[ "${2:-}" != "--skip-appimage" ]]; then
+  if ! command -v rsvg-convert >/dev/null 2>&1; then
+    echo "Error: rsvg-convert is required for AppImage icons (install librsvg2-bin)." >&2
+    exit 1
+  fi
+
+  ICON_PNG="${DIST_DIR}/io.toolcenter.tool_center.png"
+  rsvg-convert -w 256 -h 256 "${ICON_SVG}" -o "${ICON_PNG}"
+
   APPDIR="$(mktemp -d)"
-  mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
+  # mktemp creates 0700 dirs; AppImages must be readable/executable by others.
+  chmod 0755 "${APPDIR}"
+  mkdir -p \
+    "${APPDIR}/usr/bin" \
+    "${APPDIR}/usr/share/icons/hicolor/256x256/apps" \
+    "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
   cp -a "${BUNDLE_DIR}/." "${APPDIR}/usr/bin/"
 
   cat > "${APPDIR}/AppRun" <<'EOF'
@@ -89,11 +102,17 @@ HERE="$(dirname "$(readlink -f "${0}")")"
 export LD_LIBRARY_PATH="${HERE}/usr/bin/lib:${HERE}/usr/bin/data/ffmpeg/lib:${LD_LIBRARY_PATH:-}"
 exec "${HERE}/usr/bin/tool_center" "$@"
 EOF
-  chmod +x "${APPDIR}/AppRun"
+  chmod 0755 "${APPDIR}/AppRun"
 
   printf '%s' "${DESKTOP_CONTENT}" > "${APPDIR}/io.toolcenter.tool_center.desktop"
-  cp "${ICON_SVG}" "${APPDIR}/io.toolcenter.tool_center.svg"
-  cp "${ICON_SVG}" "${APPDIR}/.DirIcon"
+  cp "${ICON_SVG}" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/io.toolcenter.tool_center.svg"
+  cp "${ICON_PNG}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/io.toolcenter.tool_center.png"
+  # appimagetool requires a PNG icon at AppDir root; it derives .DirIcon from it.
+  cp "${ICON_PNG}" "${APPDIR}/io.toolcenter.tool_center.png"
+
+  # Ensure group/other can traverse and read everything inside the AppDir.
+  chmod -R a+rX "${APPDIR}"
+  chmod a+rx "${APPDIR}/AppRun"
 
   APPIMAGETOOL="${DIST_DIR}/appimagetool-x86_64.AppImage"
   if [[ ! -x "${APPIMAGETOOL}" ]]; then
@@ -109,4 +128,4 @@ EOF
   echo "Built AppImage: ${APPIMAGE_OUT}"
 fi
 
-rm -f "${ICON_SVG}"
+rm -f "${ICON_SVG}" "${ICON_PNG:-}"
