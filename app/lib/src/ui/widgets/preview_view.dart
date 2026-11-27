@@ -259,39 +259,110 @@ class _FilePreviewViewState extends State<FilePreviewView> {
           },
         );
 
+      case 'archive':
+        final entries = info.archiveEntries ?? const [];
+        if (entries.isNotEmpty) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.folder_zip_outlined, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Archive Contents (${entries.length} entries)',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(12),
+                  child: DataTable(
+                    columns: const [
+                      DataColumn(label: Text('Entry Path')),
+                      DataColumn(label: Text('Type')),
+                      DataColumn(numeric: true, label: Text('Uncompressed')),
+                    ],
+                    rows: [
+                      for (final e in entries)
+                        DataRow(
+                          cells: [
+                            DataCell(
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 420,
+                                ),
+                                child: Text(
+                                  e.path,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            DataCell(Text(e.isDir ? 'Folder' : 'File')),
+                            DataCell(Text('${e.uncompressedBytes} B')),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        return _BinaryFallbackCard(info: info);
+
       default:
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  info.previewKind == 'archive'
-                      ? Icons.folder_zip_outlined
-                      : Icons.insert_drive_file_outlined,
-                  size: 56,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  info.previewKind == 'archive'
-                      ? 'Archive package — select an Archive tool on the right to inspect or extract.'
-                      : 'Binary file — inspect metadata on the right or open in a compatible tool.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 16),
-                FilledButton.tonalIcon(
-                  onPressed: () => openInSystemApp(info.path),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: Text(l10n.openInSystemAppButton),
-                ),
-              ],
-            ),
-          ),
-        );
+        return _BinaryFallbackCard(info: info);
     }
+  }
+}
+
+class _BinaryFallbackCard extends StatelessWidget {
+  final FileInspectionModel info;
+
+  const _BinaryFallbackCard({required this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              info.previewKind == 'archive'
+                  ? Icons.folder_zip_outlined
+                  : Icons.insert_drive_file_outlined,
+              size: 56,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              info.previewKind == 'archive'
+                  ? 'Archive package — select Extract Archive on the right to unpack.'
+                  : 'Binary file — inspect metadata on the right or open in a compatible tool.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: () => openInSystemApp(info.path),
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              label: Text(l10n.openInSystemAppButton),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

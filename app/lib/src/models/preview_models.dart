@@ -14,6 +14,29 @@ class MetadataItemModel {
   }
 }
 
+class ArchiveEntryPreviewModel {
+  final String path;
+  final bool isDir;
+  final int uncompressedBytes;
+  final int? compressedBytes;
+
+  const ArchiveEntryPreviewModel({
+    required this.path,
+    required this.isDir,
+    required this.uncompressedBytes,
+    this.compressedBytes,
+  });
+
+  factory ArchiveEntryPreviewModel.fromJson(Map<String, dynamic> json) {
+    return ArchiveEntryPreviewModel(
+      path: json['path']?.toString() ?? '',
+      isDir: json['is_dir'] as bool? ?? false,
+      uncompressedBytes: (json['uncompressed_bytes'] as num?)?.toInt() ?? 0,
+      compressedBytes: (json['compressed_bytes'] as num?)?.toInt(),
+    );
+  }
+}
+
 class FileInspectionModel {
   final String path;
   final String fileName;
@@ -27,6 +50,7 @@ class FileInspectionModel {
   final int? pageCount;
   final bool pdfEncrypted;
   final List<MetadataItemModel> metadata;
+  final List<ArchiveEntryPreviewModel>? archiveEntries;
 
   const FileInspectionModel({
     required this.path,
@@ -41,6 +65,7 @@ class FileInspectionModel {
     this.pageCount,
     this.pdfEncrypted = false,
     required this.metadata,
+    this.archiveEntries,
   });
 
   factory FileInspectionModel.fromJsonStr(String raw) {
@@ -60,6 +85,10 @@ class FileInspectionModel {
       metadata: (json['metadata'] as List<dynamic>? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(MetadataItemModel.fromJson)
+          .toList(),
+      archiveEntries: (json['archive_entries'] as List<dynamic>?)
+          ?.whereType<Map<String, dynamic>>()
+          .map(ArchiveEntryPreviewModel.fromJson)
           .toList(),
     );
   }

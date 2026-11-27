@@ -16,6 +16,8 @@ core-jobs = { path = "../core-jobs" }
 core-image = { path = "../core-image" }
 core-pdf = { path = "../core-pdf" }
 core-media = { path = "../core-media" }
+core-archive = { path = "../core-archive" }
+core-convert = { path = "../core-convert" }
 core-ai = { path = "../core-ai" }
 chrono.workspace = true
 csv.workspace = true

@@ -33,5 +33,7 @@ fn build_default_registry() -> ToolRegistry {
     core_image::register_image_tools(&registry);
     core_pdf::register_pdf_tools(&registry);
     core_media::register_media_tools(&registry);
+    core_archive::register_archive_tools(&registry);
+    core_convert::register_convert_and_utility_tools(&registry);
     registry
 }

@@ -4,3 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[dependencies]
+core-jobs = { path = "../core-jobs" }
+core-image = { path = "../core-image" }
+core-pdf = { path = "../core-pdf" }
+core-media = { path = "../core-media" }
+blake3.workspace = true
+md-5.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

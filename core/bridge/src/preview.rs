@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local};
+use core_archive::{list_archive_entries, ArchiveEntryItem};
 use core_image::inspect_image_header;
 use core_media::probe_media_file;
 use core_pdf::inspect_pdf_file;
@@ -27,6 +28,7 @@ pub struct FileInspectionPayload {
     pub page_count: Option<u32>,
     pub pdf_encrypted: bool,
     pub metadata: Vec<MetadataItem>,
+    pub archive_entries: Option<Vec<ArchiveEntryItem>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +235,28 @@ pub fn inspect_file_full(path: &Path) -> Result<FileInspectionPayload, String> {
         _ => {}
     }
 
+    let archive_entries = if preview_kind == "archive" {
+        match list_archive_entries(path, 500) {
+            Ok(entries) => {
+                let total_uncompressed: u64 = entries.iter().map(|e| e.uncompressed_bytes).sum();
+                items.push(MetadataItem {
+                    label: "Archive Entries".to_string(),
+                    value: entries.len().to_string(),
+                });
+                if total_uncompressed > 0 {
+                    items.push(MetadataItem {
+                        label: "Uncompressed Size".to_string(),
+                        value: human_bytes(total_uncompressed),
+                    });
+                }
+                Some(entries)
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     Ok(FileInspectionPayload {
         path: path.display().to_string(),
         file_name,
@@ -246,6 +270,7 @@ pub fn inspect_file_full(path: &Path) -> Result<FileInspectionPayload, String> {
         page_count,
         pdf_encrypted,
         metadata: items,
+        archive_entries,
     })
 }
 
