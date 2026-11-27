@@ -1,7 +1,10 @@
 use crate::frb_generated::StreamSink;
+use crate::preview::{inspect_file_full, read_bounded_text_preview};
 use crate::state::engine;
 use core_ai::{flagged_excluded_models, ModelManager};
+use core_image::render_image_preview_png;
 use core_jobs::{JobRequest, ToolOptions};
+use core_pdf::render_pdf_page_to_png;
 use flutter_rust_bridge::frb;
 use serde_json::json;
 use std::path::PathBuf;
@@ -98,6 +101,66 @@ pub fn clear_finished_jobs() {
     engine().jobs.clear_finished();
 }
 
+/// Inspects any local file for preview classification and rich metadata without blocking Flutter UI.
+pub async fn inspect_file_json(path: String) -> Result<String, String> {
+    let p = PathBuf::from(path);
+    let payload = tokio::task::spawn_blocking(move || inspect_file_full(&p))
+        .await
+        .map_err(|e| format!("Inspector worker error: {e}"))??;
+    serde_json::to_string(&payload).map_err(|e| e.to_string())
+}
+
+/// Reads a bounded UTF-8 text / code / Markdown / CSV / JSON preview without loading huge files into RAM.
+pub async fn read_text_preview_json(path: String, max_bytes: u32) -> Result<String, String> {
+    let p = PathBuf::from(path);
+    let payload = tokio::task::spawn_blocking(move || read_bounded_text_preview(&p, max_bytes))
+        .await
+        .map_err(|e| format!("Text reader worker error: {e}"))??;
+    serde_json::to_string(&payload).map_err(|e| e.to_string())
+}
+
+/// Decodes HEIC, TIFF, or AVIF images on a background thread into PNG bytes for UI display.
+pub async fn render_decoded_image_preview(
+    path: String,
+    max_dimension: u32,
+) -> Result<Vec<u8>, String> {
+    let p = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || {
+        render_image_preview_png(&p, max_dimension).map_err(|e| e.user_message())
+    })
+    .await
+    .map_err(|e| format!("Image preview worker error: {e}"))?
+}
+
+/// Renders a single 0-indexed PDF page via `pdfium-render` into PNG bytes + page count JSON header.
+pub async fn render_pdf_page_preview_json(
+    path: String,
+    page_index: u32,
+    target_width: u32,
+    password: Option<String>,
+) -> Result<Vec<u8>, String> {
+    let p = PathBuf::from(path);
+    let rendered = tokio::task::spawn_blocking(move || {
+        render_pdf_page_to_png(&p, page_index, target_width, password.as_deref())
+            .map_err(|e| e.user_message())
+    })
+    .await
+    .map_err(|e| format!("PDF render worker error: {e}"))??;
+    Ok(rendered.png_bytes)
+}
+
+/// Returns total page count of a PDF (supporting optional user password for locked PDFs).
+pub async fn get_pdf_page_count(path: String, password: Option<String>) -> Result<u32, String> {
+    let p = PathBuf::from(path);
+    tokio::task::spawn_blocking(move || {
+        let rendered = render_pdf_page_to_png(&p, 0, 240, password.as_deref())
+            .map_err(|e| e.user_message())?;
+        Ok(rendered.page_count)
+    })
+    .await
+    .map_err(|e| format!("PDF worker error: {e}"))?
+}
+
 /// Returns the v2 permissive-licensed ONNX model catalog, cache status, and excluded non-commercial models.
 pub fn list_ai_models_json(cache_dir: String) -> Result<String, String> {
     let mgr = ModelManager::with_default_catalog(cache_dir).map_err(|e| e.to_string())?;
@@ -118,12 +181,38 @@ pub fn delete_ai_model(cache_dir: String, model_id: String) -> Result<bool, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_core_version_and_empty_jobs() {
         assert_eq!(core_version(), "0.1.0");
         assert!(list_tools_json().starts_with('['));
         assert!(list_jobs_json().starts_with('['));
+    }
+
+    #[tokio::test]
+    async fn test_preview_inspection_and_bounded_streaming_reader() {
+        let dir = tempdir().unwrap();
+
+        // DOCX Office fallback classification
+        let docx = dir.path().join("report.docx");
+        fs::write(&docx, b"PK\x03\x04dummy").unwrap();
+        let docx_json = inspect_file_json(docx.display().to_string()).await.unwrap();
+        assert!(docx_json.contains("office_coming_soon"));
+
+        // Bounded CSV streaming preview (even when truncated)
+        let csv_path = dir.path().join("table.csv");
+        let mut csv_data = String::from("name,role,score\nAlice,Engineer,98\nBob,Designer,95\n");
+        for i in 0..500 {
+            csv_data.push_str(&format!("User{i},Member,{i}\n"));
+        }
+        fs::write(&csv_path, csv_data.as_bytes()).unwrap();
+        let preview_json = read_text_preview_json(csv_path.display().to_string(), 4096)
+            .await
+            .unwrap();
+        assert!(preview_json.contains("\"truncated\":true"));
+        assert!(preview_json.contains("\"csv_headers\":[\"name\",\"role\",\"score\"]"));
     }
 
     #[test]

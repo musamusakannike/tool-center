@@ -41,5 +41,11 @@
   "aiModelsDialogSubtitle": "Models are never bundled. Only permissive (MIT / Apache-2.0) ONNX models are permitted.",
   "themeTooltip": "Switch theme (System / Light / Dark)",
   "backToHomeButton": "All Tools",
-  "noToolsRegisteredYet": "Tools load dynamically from the Rust registry."
+  "noToolsRegisteredYet": "Tools load dynamically from the Rust registry.",
+  "officePreviewComingSoonTitle": "Preview coming soon",
+  "officePreviewComingSoonBody": "Full offline rendering for Office documents (DOCX, XLSX, PPTX) is planned for a future release. You can open this file directly in your default system app below.",
+  "openInSystemAppButton": "Open in System App",
+  "metadataPanelTitle": "File Metadata",
+  "compatibleToolsTitle": "Quick Actions with This File",
+  "truncatedPreviewNotice": "Showing the first 256 KB so large files open instantly without high memory use."
 }

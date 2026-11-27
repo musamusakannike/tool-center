@@ -139,4 +139,24 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get noToolsRegisteredYet =>
       'Tools load dynamically from the Rust registry.';
+
+  @override
+  String get officePreviewComingSoonTitle => 'Preview coming soon';
+
+  @override
+  String get officePreviewComingSoonBody =>
+      'Full offline rendering for Office documents (DOCX, XLSX, PPTX) is planned for a future release. You can open this file directly in your default system app below.';
+
+  @override
+  String get openInSystemAppButton => 'Open in System App';
+
+  @override
+  String get metadataPanelTitle => 'File Metadata';
+
+  @override
+  String get compatibleToolsTitle => 'Quick Actions with This File';
+
+  @override
+  String get truncatedPreviewNotice =>
+      'Showing the first 256 KB so large files open instantly without high memory use.';
 }

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'
     hide GlobalMaterialLocalizations, GlobalCupertinoLocalizations;
 import 'package:material_ui/material_ui.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'l10n/app_localizations.dart';
 import 'src/services/core_service.dart';
@@ -16,6 +17,7 @@ import 'src/ui/widgets/tool_workspace_view.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   final controller = AppController(backend: RustBridgeBackend());
   await controller.initialize(launchArgs: args);
   runApp(ToolCenterApp(controller: controller));

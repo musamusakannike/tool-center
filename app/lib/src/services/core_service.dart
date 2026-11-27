@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/preview_models.dart';
 import '../models/tool_models.dart';
 import '../rust/api.dart' as rust_api;
 import '../rust/frb_generated.dart';
@@ -25,6 +26,19 @@ abstract class ToolCenterBackend {
   });
   bool cancelJob(String jobId);
   void clearFinishedJobs();
+  Future<FileInspectionModel> inspectFile(String path);
+  Future<TextPreviewModel> readTextPreview(String path, {int maxBytes = 262144});
+  Future<Uint8List> renderDecodedImagePreview(
+    String path, {
+    int maxDimension = 2048,
+  });
+  Future<Uint8List> renderPdfPagePreview(
+    String path, {
+    required int pageIndex,
+    int targetWidth = 1100,
+    String? password,
+  });
+  Future<int> getPdfPageCount(String path, {String? password});
   Future<(List<AiModelStatusModel>, List<FlaggedExcludedModelInfo>)>
   listAiModels();
   Future<bool> deleteAiModel(String modelId);
@@ -110,6 +124,55 @@ class RustBridgeBackend implements ToolCenterBackend {
   @override
   void clearFinishedJobs() => rust_api.clearFinishedJobs();
 
+  @override
+  Future<FileInspectionModel> inspectFile(String path) async {
+    final raw = await rust_api.inspectFileJson(path: path);
+    return FileInspectionModel.fromJsonStr(raw);
+  }
+
+  @override
+  Future<TextPreviewModel> readTextPreview(
+    String path, {
+    int maxBytes = 262144,
+  }) async {
+    final raw = await rust_api.readTextPreviewJson(
+      path: path,
+      maxBytes: maxBytes,
+    );
+    return TextPreviewModel.fromJsonStr(raw);
+  }
+
+  @override
+  Future<Uint8List> renderDecodedImagePreview(
+    String path, {
+    int maxDimension = 2048,
+  }) {
+    return rust_api.renderDecodedImagePreview(
+      path: path,
+      maxDimension: maxDimension,
+    );
+  }
+
+  @override
+  Future<Uint8List> renderPdfPagePreview(
+    String path, {
+    required int pageIndex,
+    int targetWidth = 1100,
+    String? password,
+  }) {
+    return rust_api.renderPdfPagePreviewJson(
+      path: path,
+      pageIndex: pageIndex,
+      targetWidth: targetWidth,
+      password: password,
+    );
+  }
+
+  @override
+  Future<int> getPdfPageCount(String path, {String? password}) {
+    return rust_api.getPdfPageCount(path: path, password: password);
+  }
+
   Future<String> _resolveAiCacheDir() async {
     try {
       final supportDir = await getApplicationSupportDirectory();
@@ -147,11 +210,17 @@ class RustBridgeBackend implements ToolCenterBackend {
 class FakeToolCenterBackend implements ToolCenterBackend {
   final List<ToolDescriptorModel> tools;
   final List<JobSnapshotModel> jobs;
+  final Map<String, FileInspectionModel> mockInspections;
+  final Map<String, TextPreviewModel> mockTextPreviews;
   final StreamController<JobSnapshotModel> _events =
       StreamController<JobSnapshotModel>.broadcast();
 
-  FakeToolCenterBackend({this.tools = const [], List<JobSnapshotModel>? jobs})
-    : jobs = List<JobSnapshotModel>.from(jobs ?? const []);
+  FakeToolCenterBackend({
+    this.tools = const [],
+    List<JobSnapshotModel>? jobs,
+    this.mockInspections = const {},
+    this.mockTextPreviews = const {},
+  }) : jobs = List<JobSnapshotModel>.from(jobs ?? const []);
 
   @override
   Future<void> initialize() async {}
@@ -201,6 +270,69 @@ class FakeToolCenterBackend implements ToolCenterBackend {
   void clearFinishedJobs() {
     jobs.removeWhere((j) => !j.status.isActive);
   }
+
+  @override
+  Future<FileInspectionModel> inspectFile(String path) async {
+    if (mockInspections.containsKey(path)) {
+      return mockInspections[path]!;
+    }
+    final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
+    final kind = switch (ext) {
+      'docx' || 'xlsx' || 'pptx' => 'office_coming_soon',
+      'csv' => 'csv',
+      'json' => 'json',
+      'md' => 'markdown',
+      _ => 'text',
+    };
+    return FileInspectionModel(
+      path: path,
+      fileName: p.basename(path),
+      extension: ext,
+      previewKind: kind,
+      sizeBytes: 1024,
+      metadata: [
+        MetadataItemModel(label: 'File Name', value: p.basename(path)),
+        const MetadataItemModel(label: 'Size', value: '1.0 KB (1024 bytes)'),
+      ],
+    );
+  }
+
+  @override
+  Future<TextPreviewModel> readTextPreview(
+    String path, {
+    int maxBytes = 262144,
+  }) async {
+    if (mockTextPreviews.containsKey(path)) {
+      return mockTextPreviews[path]!;
+    }
+    return const TextPreviewModel(
+      text: 'Sample text preview',
+      truncated: false,
+      totalBytes: 19,
+      lineCountEstimate: 1,
+    );
+  }
+
+  @override
+  Future<Uint8List> renderDecodedImagePreview(
+    String path, {
+    int maxDimension = 2048,
+  }) async {
+    return Uint8List(0);
+  }
+
+  @override
+  Future<Uint8List> renderPdfPagePreview(
+    String path, {
+    required int pageIndex,
+    int targetWidth = 1100,
+    String? password,
+  }) async {
+    return Uint8List(0);
+  }
+
+  @override
+  Future<int> getPdfPageCount(String path, {String? password}) async => 1;
 
   @override
   Future<(List<AiModelStatusModel>, List<FlaggedExcludedModelInfo>)>

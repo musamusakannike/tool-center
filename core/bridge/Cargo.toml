@@ -13,7 +13,16 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
 [dependencies]
 core-jobs = { path = "../core-jobs" }
+core-image = { path = "../core-image" }
+core-pdf = { path = "../core-pdf" }
+core-media = { path = "../core-media" }
 core-ai = { path = "../core-ai" }
+chrono.workspace = true
+csv.workspace = true
 flutter_rust_bridge = "=2.13.0"
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

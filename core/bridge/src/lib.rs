@@ -2,4 +2,5 @@
 
 pub mod api;
 mod frb_generated;
+mod preview;
 mod state;

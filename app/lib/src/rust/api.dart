@@ -44,6 +44,47 @@ bool cancelJob({required String jobId}) =>
 /// Clears finished, failed, and cancelled jobs from the queue history.
 void clearFinishedJobs() => RustLib.instance.api.crateApiClearFinishedJobs();
 
+/// Inspects any local file for preview classification and rich metadata without blocking Flutter UI.
+Future<String> inspectFileJson({required String path}) =>
+    RustLib.instance.api.crateApiInspectFileJson(path: path);
+
+/// Reads a bounded UTF-8 text / code / Markdown / CSV / JSON preview without loading huge files into RAM.
+Future<String> readTextPreviewJson({
+  required String path,
+  required int maxBytes,
+}) => RustLib.instance.api.crateApiReadTextPreviewJson(
+  path: path,
+  maxBytes: maxBytes,
+);
+
+/// Decodes HEIC, TIFF, or AVIF images on a background thread into PNG bytes for UI display.
+Future<Uint8List> renderDecodedImagePreview({
+  required String path,
+  required int maxDimension,
+}) => RustLib.instance.api.crateApiRenderDecodedImagePreview(
+  path: path,
+  maxDimension: maxDimension,
+);
+
+/// Renders a single 0-indexed PDF page via `pdfium-render` into PNG bytes + page count JSON header.
+Future<Uint8List> renderPdfPagePreviewJson({
+  required String path,
+  required int pageIndex,
+  required int targetWidth,
+  String? password,
+}) => RustLib.instance.api.crateApiRenderPdfPagePreviewJson(
+  path: path,
+  pageIndex: pageIndex,
+  targetWidth: targetWidth,
+  password: password,
+);
+
+/// Returns total page count of a PDF (supporting optional user password for locked PDFs).
+Future<int> getPdfPageCount({required String path, String? password}) => RustLib
+    .instance
+    .api
+    .crateApiGetPdfPageCount(path: path, password: password);
+
 /// Returns the v2 permissive-licensed ONNX model catalog, cache status, and excluded non-commercial models.
 Future<String> listAiModelsJson({required String cacheDir}) =>
     RustLib.instance.api.crateApiListAiModelsJson(cacheDir: cacheDir);

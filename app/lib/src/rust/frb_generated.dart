@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1192095338;
+  int get rustContentHash => 721652777;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -92,11 +92,32 @@ abstract class RustLibApi extends BaseApi {
 
   String? crateApiGetJobJson({required String jobId});
 
+  Future<int> crateApiGetPdfPageCount({required String path, String? password});
+
+  Future<String> crateApiInspectFileJson({required String path});
+
   Future<String> crateApiListAiModelsJson({required String cacheDir});
 
   String crateApiListJobsJson();
 
   String crateApiListToolsJson();
+
+  Future<String> crateApiReadTextPreviewJson({
+    required String path,
+    required int maxBytes,
+  });
+
+  Future<Uint8List> crateApiRenderDecodedImagePreview({
+    required String path,
+    required int maxDimension,
+  });
+
+  Future<Uint8List> crateApiRenderPdfPagePreviewJson({
+    required String path,
+    required int pageIndex,
+    required int targetWidth,
+    String? password,
+  });
 
   Future<String> crateApiSubmitToolJob({
     required String toolId,
@@ -241,6 +262,68 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "get_job_json", argNames: ["jobId"]);
 
   @override
+  Future<int> crateApiGetPdfPageCount({
+    required String path,
+    String? password,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_opt_String(password, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_32,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiGetPdfPageCountConstMeta,
+        argValues: [path, password],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiGetPdfPageCountConstMeta => const TaskConstMeta(
+    debugName: "get_pdf_page_count",
+    argNames: ["path", "password"],
+  );
+
+  @override
+  Future<String> crateApiInspectFileJson({required String path}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiInspectFileJsonConstMeta,
+        argValues: [path],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiInspectFileJsonConstMeta =>
+      const TaskConstMeta(debugName: "inspect_file_json", argNames: ["path"]);
+
+  @override
   Future<String> crateApiListAiModelsJson({required String cacheDir}) {
     return handler.executeNormal(
       NormalTask(
@@ -250,7 +333,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 8,
             port: port_,
           );
         },
@@ -276,7 +359,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 7)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 9)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -298,7 +381,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 8)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -313,6 +396,115 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiListToolsJsonConstMeta =>
       const TaskConstMeta(debugName: "list_tools_json", argNames: []);
+
+  @override
+  Future<String> crateApiReadTextPreviewJson({
+    required String path,
+    required int maxBytes,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_u_32(maxBytes, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiReadTextPreviewJsonConstMeta,
+        argValues: [path, maxBytes],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiReadTextPreviewJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "read_text_preview_json",
+        argNames: ["path", "maxBytes"],
+      );
+
+  @override
+  Future<Uint8List> crateApiRenderDecodedImagePreview({
+    required String path,
+    required int maxDimension,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_u_32(maxDimension, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiRenderDecodedImagePreviewConstMeta,
+        argValues: [path, maxDimension],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiRenderDecodedImagePreviewConstMeta =>
+      const TaskConstMeta(
+        debugName: "render_decoded_image_preview",
+        argNames: ["path", "maxDimension"],
+      );
+
+  @override
+  Future<Uint8List> crateApiRenderPdfPagePreviewJson({
+    required String path,
+    required int pageIndex,
+    required int targetWidth,
+    String? password,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_u_32(pageIndex, serializer);
+          sse_encode_u_32(targetWidth, serializer);
+          sse_encode_opt_String(password, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiRenderPdfPagePreviewJsonConstMeta,
+        argValues: [path, pageIndex, targetWidth, password],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiRenderPdfPagePreviewJsonConstMeta =>
+      const TaskConstMeta(
+        debugName: "render_pdf_page_preview_json",
+        argNames: ["path", "pageIndex", "targetWidth", "password"],
+      );
 
   @override
   Future<String> crateApiSubmitToolJob({
@@ -332,7 +524,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 14,
             port: port_,
           );
         },
@@ -364,7 +556,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 10,
+              funcId: 15,
               port: port_,
             );
           },
@@ -426,6 +618,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -496,6 +694,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
   }
 
   @protected
@@ -580,6 +784,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_String(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
   }
 
   @protected

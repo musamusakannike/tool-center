@@ -345,6 +345,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Tools load dynamically from the Rust registry.'**
   String get noToolsRegisteredYet;
+
+  /// No description provided for @officePreviewComingSoonTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview coming soon'**
+  String get officePreviewComingSoonTitle;
+
+  /// No description provided for @officePreviewComingSoonBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Full offline rendering for Office documents (DOCX, XLSX, PPTX) is planned for a future release. You can open this file directly in your default system app below.'**
+  String get officePreviewComingSoonBody;
+
+  /// No description provided for @openInSystemAppButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in System App'**
+  String get openInSystemAppButton;
+
+  /// No description provided for @metadataPanelTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'File Metadata'**
+  String get metadataPanelTitle;
+
+  /// No description provided for @compatibleToolsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Actions with This File'**
+  String get compatibleToolsTitle;
+
+  /// No description provided for @truncatedPreviewNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing the first 256 KB so large files open instantly without high memory use.'**
+  String get truncatedPreviewNotice;
 }
 
 class _AppLocalizationsDelegate
