@@ -1,0 +1,30 @@
+# Rust
+/core/target/
+**/*.rs.bk
+*.pdb
+
+# Flutter / Dart
+/app/.dart_tool/
+/app/.flutter-plugins
+/app/.flutter-plugins-dependencies
+/app/.packages
+/app/build/
+/app/coverage/
+/app/linux/flutter/ephemeral/
+/app/macos/Flutter/ephemeral/
+/app/windows/flutter/ephemeral/
+/app/macos/Pods/
+/app/.metadata
+
+# Bundled / fetched native third-party runtime binaries (fetched reproducibly via scripts/)
+/vendor/
+/dist/
+/artifacts/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
