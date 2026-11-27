@@ -72,13 +72,13 @@ FFMPEG_ASSETS = {
         "zip",
     ),
     "macos-arm64": (
-        "https://github.com/mt-mograph/ffmpeg-lgpl/releases/download/8.1.2/ffmpeg-darwin-arm64.gz",
-        "0c6dd6d1d0197048be12263ad34afc7f99464ea18679abca7aa111a94107b3c4",
+        "https://github.com/genesis-webagentur-org/ffmpeg-lgpl-macos/releases/download/9.0.2-1/ffmpeg-darwin-arm64.gz",
+        "c9ff6614a678ef0540d63c9d0ff252c44736c90ce9473d45df232c88ebb3927d",
         "gz",
     ),
     "macos-x64": (
-        "https://github.com/mt-mograph/ffmpeg-lgpl/releases/download/8.1.2/ffmpeg-darwin-x64.gz",
-        "6e03487ac953e64a39d9372fbfa883cbdf756be14dd88aeb85a37b6562e25196",
+        "https://github.com/genesis-webagentur-org/ffmpeg-lgpl-macos/releases/download/9.0.2-1/ffmpeg-darwin-x86_64.gz",
+        "f72ebc3b2488fcb8d77a9dad3f0eac824b80fb84b830b4e07f57c701ab7114dc",
         "gz",
     ),
 }

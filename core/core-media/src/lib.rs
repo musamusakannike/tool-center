@@ -76,6 +76,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_ffmpeg_stderr_probe_dimensions_and_streams_without_ffprobe() {
+        let sample_stderr = "\
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/tmp/clip1.mp4':
+  Metadata:
+    major_brand     : isom
+  Duration: 00:00:02.00, start: 0.000000, bitrate: 158 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, progressive), 160x120 [SAR 1:1 DAR 4:3], 72 kb/s, 15 fps, 15 tbr, 15360 tbn (default)
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 74 kb/s (default)
+At least one output file must be specified";
+
+        let info =
+            sidecar::parse_ffmpeg_stderr_probe(sample_stderr, Path::new("/tmp/clip1.mp4")).unwrap();
+        assert_eq!(info.video_codec.as_deref(), Some("H264"));
+        assert_eq!(info.width, Some(160));
+        assert_eq!(info.height, Some(120));
+        assert_eq!(info.fps.as_deref(), Some("15.00 fps"));
+        assert_eq!(info.duration_secs, Some(2.0));
+        assert_eq!(info.bit_rate_kbps, Some(158));
+        assert_eq!(info.audio_codec.as_deref(), Some("AAC"));
+        assert_eq!(info.sample_rate_hz, Some(44100));
+        assert_eq!(info.channels, Some(1));
+    }
+
+    #[test]
     fn trim_merge_compress_convert_extract_audio_frames_and_gif_end_to_end() {
         let dir = tempdir().unwrap();
         let clip1 = dir.path().join("clip1.mp4");
@@ -111,15 +135,24 @@ mod tests {
             .unwrap();
         assert!(comp_res.outputs[0].size_bytes > 0);
 
-        // 4. Convert Video to WebM
-        let mut conv_v_opts = ToolOptions::new();
-        conv_v_opts.insert("format", json!("webm"));
-        let conv_v_res = VideoConvertTool
-            .run(&make_ctx(vec![clip1.clone()], conv_v_opts))
+        // 4. Convert Video to MKV (all platforms) + WebM (when VP8/VP9/AV1 encoder is compiled in)
+        let mut conv_mkv_opts = ToolOptions::new();
+        conv_mkv_opts.insert("format", json!("mkv"));
+        let conv_mkv_res = VideoConvertTool
+            .run(&make_ctx(vec![clip1.clone()], conv_mkv_opts))
             .unwrap();
-        assert!(Path::new(&conv_v_res.outputs[0].path).exists());
+        assert!(Path::new(&conv_mkv_res.outputs[0].path).exists());
 
-        // 5. Extract Audio (MP3) -> Convert Audio (WAV)
+        if runner::select_webm_video_encoder().is_some() {
+            let mut conv_v_opts = ToolOptions::new();
+            conv_v_opts.insert("format", json!("webm"));
+            let conv_v_res = VideoConvertTool
+                .run(&make_ctx(vec![clip1.clone()], conv_v_opts))
+                .unwrap();
+            assert!(Path::new(&conv_v_res.outputs[0].path).exists());
+        }
+
+        // 5. Extract Audio (MP3) -> Convert Audio (WAV + OGG)
         let mut ext_a_opts = ToolOptions::new();
         ext_a_opts.insert("format", json!("mp3"));
         let ext_a_res = ExtractAudioTool
@@ -131,9 +164,16 @@ mod tests {
         let mut conv_a_opts = ToolOptions::new();
         conv_a_opts.insert("format", json!("wav"));
         let conv_a_res = AudioConvertTool
-            .run(&make_ctx(vec![mp3_path], conv_a_opts))
+            .run(&make_ctx(vec![mp3_path.clone()], conv_a_opts))
             .unwrap();
         assert!(Path::new(&conv_a_res.outputs[0].path).exists());
+
+        let mut conv_ogg_opts = ToolOptions::new();
+        conv_ogg_opts.insert("format", json!("ogg"));
+        let conv_ogg_res = AudioConvertTool
+            .run(&make_ctx(vec![mp3_path], conv_ogg_opts))
+            .unwrap();
+        assert!(Path::new(&conv_ogg_res.outputs[0].path).exists());
 
         // 6. Extract Frames
         let mut frames_opts = ToolOptions::new();

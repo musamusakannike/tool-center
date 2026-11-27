@@ -84,11 +84,11 @@ pub fn select_mp4_video_encoder(prefer_av1: bool) -> (&'static str, Vec<String>)
     )
 }
 
-/// Selects an LGPL-compatible WebM video encoder (`libsvtav1` or `libvpx-vp9`).
-pub fn select_webm_video_encoder() -> (&'static str, Vec<String>) {
+/// Selects an LGPL-compatible WebM video encoder (`libvpx-vp9`, `libsvtav1`, `librav1e`, `libaom-av1`, or `libvpx`) if compiled in.
+pub fn select_webm_video_encoder() -> Option<(&'static str, Vec<String>)> {
     let encs = available_ffmpeg_encoders();
     if encs.contains("libvpx-vp9") {
-        (
+        Some((
             "libvpx-vp9",
             vec![
                 "-b:v".into(),
@@ -100,23 +100,44 @@ pub fn select_webm_video_encoder() -> (&'static str, Vec<String>) {
                 "-cpu-used".into(),
                 "4".into(),
             ],
-        )
+        ))
     } else if encs.contains("libsvtav1") {
-        ("libsvtav1", vec!["-preset".into(), "8".into()])
+        Some(("libsvtav1", vec!["-preset".into(), "8".into()]))
+    } else if encs.contains("librav1e") {
+        Some(("librav1e", vec!["-speed".into(), "8".into()]))
+    } else if encs.contains("libaom-av1") {
+        Some((
+            "libaom-av1",
+            vec!["-cpu-used".into(), "6".into(), "-crf".into(), "34".into()],
+        ))
+    } else if encs.contains("libvpx") {
+        Some(("libvpx", vec!["-b:v".into(), "1500k".into()]))
     } else {
-        ("vp8", Vec::new())
+        None
     }
 }
 
-/// Selects an LGPL-compatible Ogg audio encoder.
-pub fn select_ogg_audio_encoder() -> &'static str {
+/// Selects an LGPL-compatible Ogg audio encoder (`libvorbis`, `libopus`, or built-in `vorbis` with `-strict -2`).
+pub fn select_ogg_audio_encoder() -> (&'static str, Vec<String>) {
     let encs = available_ffmpeg_encoders();
     if encs.contains("libvorbis") {
-        "libvorbis"
+        ("libvorbis", Vec::new())
     } else if encs.contains("libopus") {
-        "libopus"
+        ("libopus", Vec::new())
     } else {
-        "vorbis"
+        ("vorbis", vec!["-strict".into(), "-2".into()])
+    }
+}
+
+/// Selects an LGPL-compatible MP3 audio encoder (`libmp3lame` or `libshine`).
+pub fn select_mp3_audio_encoder() -> Option<&'static str> {
+    let encs = available_ffmpeg_encoders();
+    if encs.contains("libmp3lame") {
+        Some("libmp3lame")
+    } else if encs.contains("libshine") {
+        Some("libshine")
+    } else {
+        None
     }
 }
 

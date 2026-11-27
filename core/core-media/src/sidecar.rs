@@ -303,7 +303,10 @@ fn parse_ffprobe_json(raw: &[u8]) -> Result<MediaProbeInfo, serde_json::Error> {
     Ok(info)
 }
 
-fn parse_ffmpeg_stderr_probe(stderr: &str, path: &Path) -> Result<MediaProbeInfo, ToolError> {
+pub(crate) fn parse_ffmpeg_stderr_probe(
+    stderr: &str,
+    path: &Path,
+) -> Result<MediaProbeInfo, ToolError> {
     if stderr.contains("Invalid data found when processing input") {
         return Err(ToolError::corrupt(
             path,
@@ -315,28 +318,98 @@ fn parse_ffmpeg_stderr_probe(stderr: &str, path: &Path) -> Result<MediaProbeInfo
     let mut info = MediaProbeInfo::default();
     for line in stderr.lines() {
         let trimmed = line.trim();
+        if info.format_name.is_none() {
+            if let Some(rest) = trimmed.strip_prefix("Input #0,") {
+                if let Some((fmt, _)) = rest.split_once(", from ") {
+                    let clean = fmt.trim();
+                    if !clean.is_empty() {
+                        info.format_name = Some(clean.to_string());
+                    }
+                }
+            }
+        }
         if let Some(rest) = trimmed.strip_prefix("Duration:") {
-            if let Some(dur_str) = rest.split(',').next() {
-                info.duration_secs = parse_hms_seconds(dur_str.trim());
+            for seg in rest.split(',') {
+                let s = seg.trim();
+                if info.duration_secs.is_none() {
+                    info.duration_secs = parse_hms_seconds(s);
+                } else if let Some(br_rest) = s.strip_prefix("bitrate:") {
+                    if let Some(num_str) = br_rest.split_whitespace().next() {
+                        info.bit_rate_kbps = num_str.parse::<u64>().ok();
+                    }
+                }
             }
         } else if trimmed.contains("Video:") && info.video_codec.is_none() {
             if let Some(after) = trimmed.split("Video:").nth(1) {
                 let codec = after
-                    .split([',', ' '])
+                    .split([',', ' ', '('])
                     .find(|s| !s.is_empty())
                     .unwrap_or_default();
                 if !codec.is_empty() {
                     info.video_codec = Some(codec.to_uppercase());
                 }
+
+                let tokens: Vec<&str> = after.split_whitespace().collect();
+                for (idx, raw_tok) in tokens.iter().enumerate() {
+                    let tok = raw_tok
+                        .trim_matches(|c: char| matches!(c, ',' | ';' | '[' | ']' | '(' | ')'));
+                    if info.width.is_none() {
+                        if let Some((w_s, h_s)) = tok.split_once('x') {
+                            if !w_s.is_empty()
+                                && !h_s.is_empty()
+                                && !w_s.starts_with('0')
+                                && !h_s.starts_with('0')
+                                && w_s.chars().all(|c| c.is_ascii_digit())
+                                && h_s.chars().all(|c| c.is_ascii_digit())
+                            {
+                                if let (Ok(w), Ok(h)) = (w_s.parse::<u32>(), h_s.parse::<u32>()) {
+                                    if w >= 2 && h >= 2 {
+                                        info.width = Some(w);
+                                        info.height = Some(h);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if info.fps.is_none() && tok == "fps" && idx > 0 {
+                        let prev = tokens[idx - 1].trim_matches(',');
+                        if let Ok(rate) = prev.parse::<f64>() {
+                            if rate > 0.0 {
+                                info.fps = Some(format!("{rate:.2} fps"));
+                            }
+                        }
+                    }
+                }
             }
         } else if trimmed.contains("Audio:") && info.audio_codec.is_none() {
             if let Some(after) = trimmed.split("Audio:").nth(1) {
                 let codec = after
-                    .split([',', ' '])
+                    .split([',', ' ', '('])
                     .find(|s| !s.is_empty())
                     .unwrap_or_default();
                 if !codec.is_empty() {
                     info.audio_codec = Some(codec.to_uppercase());
+                }
+
+                for seg in after.split(',') {
+                    let s = seg.trim();
+                    if let Some(hz_str) = s.strip_suffix("Hz") {
+                        if let Ok(hz) = hz_str.trim().parse::<u32>() {
+                            info.sample_rate_hz = Some(hz);
+                        }
+                    } else if info.channels.is_none() {
+                        if s.eq_ignore_ascii_case("mono") || s == "1 channels" || s == "1 channel" {
+                            info.channels = Some(1);
+                        } else if s.eq_ignore_ascii_case("stereo") || s == "2 channels" {
+                            info.channels = Some(2);
+                        } else if s.starts_with("5.1") || s == "6 channels" {
+                            info.channels = Some(6);
+                        } else if s.starts_with("7.1") || s == "8 channels" {
+                            info.channels = Some(8);
+                        } else if let Some(ch_num) = s.strip_suffix("channels") {
+                            info.channels = ch_num.trim().parse::<u32>().ok();
+                        }
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 use crate::runner::{
-    run_ffmpeg_with_progress, select_mp4_video_encoder, select_ogg_audio_encoder,
-    select_webm_video_encoder,
+    run_ffmpeg_with_progress, select_mp3_audio_encoder, select_mp4_video_encoder,
+    select_ogg_audio_encoder, select_webm_video_encoder,
 };
 use crate::sidecar::{parse_hms_seconds, probe_media_file};
 use core_jobs::{
@@ -55,7 +55,7 @@ fn build_video_transcode_args(
     bitrate_kbps: u32,
     prefer_av1: bool,
     scale_height: Option<u32>,
-) -> Vec<String> {
+) -> Result<Vec<String>, ToolError> {
     let mut args = Vec::new();
     if let Some(h) = scale_height.filter(|&h| h > 0) {
         // Ensure dimensions stay divisible by 2 for 4:2:0 encoders
@@ -65,20 +65,27 @@ fn build_video_transcode_args(
 
     match target_ext {
         "webm" => {
-            let (venc, extra) = select_webm_video_encoder();
+            let (venc, extra) = select_webm_video_encoder().ok_or_else(|| {
+                ToolError::unsupported(
+                    "WebM video encoding requires a VP8/VP9/AV1 encoder (libvpx or SVT-AV1) not included in this FFmpeg build. Choose MP4 or MKV instead.",
+                )
+            })?;
             args.extend(["-c:v".into(), venc.into()]);
             args.extend(extra);
-            let aenc = select_ogg_audio_encoder();
-            args.extend(["-c:a".into(), aenc.into(), "-b:a".into(), "128k".into()]);
+            let (aenc, aextra) = select_ogg_audio_encoder();
+            args.extend(["-c:a".into(), aenc.into()]);
+            args.extend(aextra);
+            args.extend(["-b:a".into(), "128k".into()]);
         }
         "avi" => {
+            let aenc = select_mp3_audio_encoder().unwrap_or("aac");
             args.extend([
                 "-c:v".into(),
                 "mpeg4".into(),
                 "-b:v".into(),
                 format!("{bitrate_kbps}k"),
                 "-c:a".into(),
-                "libmp3lame".into(),
+                aenc.into(),
                 "-b:a".into(),
                 "160k".into(),
             ]);
@@ -98,14 +105,17 @@ fn build_video_transcode_args(
             }
         }
     }
-    args
+    Ok(args)
 }
 
-fn build_audio_transcode_args(target_ext: &str, bitrate_kbps: u32) -> (&'static str, Vec<String>) {
+fn build_audio_transcode_args(
+    target_ext: &str,
+    bitrate_kbps: u32,
+) -> Result<(&'static str, Vec<String>), ToolError> {
     match target_ext {
-        "wav" => ("wav", vec!["-vn".into(), "-c:a".into(), "pcm_s16le".into()]),
-        "flac" => ("flac", vec!["-vn".into(), "-c:a".into(), "flac".into()]),
-        "aac" | "m4a" => (
+        "wav" => Ok(("wav", vec!["-vn".into(), "-c:a".into(), "pcm_s16le".into()])),
+        "flac" => Ok(("flac", vec!["-vn".into(), "-c:a".into(), "flac".into()])),
+        "aac" | "m4a" => Ok((
             "m4a",
             vec![
                 "-vn".into(),
@@ -114,30 +124,31 @@ fn build_audio_transcode_args(target_ext: &str, bitrate_kbps: u32) -> (&'static 
                 "-b:a".into(),
                 format!("{bitrate_kbps}k"),
             ],
-        ),
+        )),
         "ogg" => {
-            let enc = select_ogg_audio_encoder();
-            (
-                "ogg",
+            let (enc, extra) = select_ogg_audio_encoder();
+            let mut v = vec!["-vn".into(), "-c:a".into(), enc.into()];
+            v.extend(extra);
+            v.extend(["-b:a".into(), format!("{bitrate_kbps}k")]);
+            Ok(("ogg", v))
+        }
+        _ => {
+            let mp3_enc = select_mp3_audio_encoder().ok_or_else(|| {
+                ToolError::unsupported(
+                    "MP3 encoding requires LAME (libmp3lame) in the FFmpeg sidecar. Choose M4A, WAV, or FLAC instead.",
+                )
+            })?;
+            Ok((
+                "mp3",
                 vec![
                     "-vn".into(),
                     "-c:a".into(),
-                    enc.into(),
+                    mp3_enc.into(),
                     "-b:a".into(),
                     format!("{bitrate_kbps}k"),
                 ],
-            )
+            ))
         }
-        _ => (
-            "mp3",
-            vec![
-                "-vn".into(),
-                "-c:a".into(),
-                "libmp3lame".into(),
-                "-b:a".into(),
-                format!("{bitrate_kbps}k"),
-            ],
-        ),
     }
 }
 
@@ -280,10 +291,10 @@ impl Tool for MediaTrimTool {
                 input.display().to_string(),
             ];
             if is_audio_only_ext(&ext) {
-                let (_, audio_args) = build_audio_transcode_args(&ext, 192);
+                let (_, audio_args) = build_audio_transcode_args(&ext, 192)?;
                 args.extend(audio_args);
             } else {
-                args.extend(build_video_transcode_args(&ext, 2500, false, None));
+                args.extend(build_video_transcode_args(&ext, 2500, false, None)?);
             }
             args.push(out_path.display().to_string());
 
@@ -393,11 +404,17 @@ impl Tool for MediaMergeTool {
                 "-i".into(),
                 list_path.display().to_string(),
             ];
-            if is_audio_only_ext(&first_ext) {
-                let (_, a_args) = build_audio_transcode_args(&first_ext, 192);
-                re_args.extend(a_args);
+            let transcode_args = if is_audio_only_ext(&first_ext) {
+                build_audio_transcode_args(&first_ext, 192).map(|(_, a)| a)
             } else {
-                re_args.extend(build_video_transcode_args(&first_ext, 2500, false, None));
+                build_video_transcode_args(&first_ext, 2500, false, None)
+            };
+            match transcode_args {
+                Ok(extra_args) => re_args.extend(extra_args),
+                Err(err) => {
+                    let _ = fs::remove_file(&list_path);
+                    return Err(err);
+                }
             }
             re_args.push(out_path.display().to_string());
             let res = run_ffmpeg_with_progress(
@@ -537,7 +554,7 @@ impl Tool for VideoCompressTool {
                 bitrate,
                 false,
                 (max_h > 0).then_some(max_h),
-            ));
+            )?);
             args.push(out_path.display().to_string());
 
             run_ffmpeg_with_progress(ctx, &args, dur, "Compressing video")?;
@@ -629,7 +646,7 @@ impl Tool for VideoConvertTool {
             let out_path = ctx.output_path_for(input, "_converted", Some(&fmt));
 
             let mut args = vec!["-i".into(), input.display().to_string()];
-            args.extend(build_video_transcode_args(&fmt, 2500, false, None));
+            args.extend(build_video_transcode_args(&fmt, 2500, false, None)?);
             args.push(out_path.display().to_string());
 
             run_ffmpeg_with_progress(ctx, &args, dur, "Converting video")?;
@@ -753,7 +770,7 @@ impl Tool for ExtractAudioTool {
             .get_string_or("bitrate", "192")
             .parse()
             .unwrap_or(192);
-        let (out_ext, audio_args) = build_audio_transcode_args(&req_fmt, bitrate);
+        let (out_ext, audio_args) = build_audio_transcode_args(&req_fmt, bitrate)?;
 
         let mut outputs = Vec::with_capacity(ctx.inputs.len());
         for input in &ctx.inputs {
@@ -885,7 +902,7 @@ impl Tool for AudioConvertTool {
             .get_string_or("bitrate", "192")
             .parse()
             .unwrap_or(192);
-        let (out_ext, audio_args) = build_audio_transcode_args(&req_fmt, bitrate);
+        let (out_ext, audio_args) = build_audio_transcode_args(&req_fmt, bitrate)?;
 
         let mut outputs = Vec::with_capacity(ctx.inputs.len());
         for input in &ctx.inputs {

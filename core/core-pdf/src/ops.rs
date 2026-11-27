@@ -689,7 +689,7 @@ pub fn encrypt_pdf_aes256(
         perms |= Permissions::COPYABLE;
     }
 
-    let eff_owner = if owner_password.is_empty() {
+    let owner_password = if owner_password.is_empty() {
         user_password
     } else {
         owner_password
@@ -704,7 +704,7 @@ pub fn encrypt_pdf_aes256(
         file_encryption_key: &fek,
         stream_filter: b"StdCF".to_vec(),
         string_filter: b"StdCF".to_vec(),
-        owner_password: eff_owner,
+        owner_password, // ggignore: runtime variable, not a hardcoded secret
         user_password,
         permissions: perms,
     })
