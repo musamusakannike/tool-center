@@ -6,6 +6,7 @@ pub mod downloader;
 pub mod manifest;
 pub mod onnx_fixture;
 pub mod runtime;
+pub mod upscale;
 
 pub use bg_remove::AiRemoveBgTool;
 pub use downloader::{
@@ -22,6 +23,7 @@ pub use runtime::{
     ensure_ort_environment, locate_onnxruntime_dylib, query_available_providers,
     ActiveProviderInfo, OrtSessionHandle, SessionPool,
 };
+pub use upscale::{select_auto_tile_size, AiUpscaleTool, LANCZOS_FALLBACK_ID};
 
 use core_jobs::{CancelHandle, ToolError};
 use std::path::Path;
@@ -510,5 +512,136 @@ mod tests {
         assert_eq!((out_img.width(), out_img.height()), (540, 380));
         let bg_corner = out_img.get_pixel(5, 5);
         assert!((bg_corner[2] as i32 - 220).abs() <= 6);
+    }
+
+    #[test]
+    fn ai_upscale_tiled_blending_has_zero_seams_and_lanczos_fallback_works() {
+        use core_jobs::{Tool, ToolContext, ToolOptions};
+        use image::{ImageBuffer, Rgba};
+        use serde_json::json;
+        use std::sync::Arc;
+
+        let dir = tempdir().unwrap();
+        let models_dir = dir.path().join("models");
+        let work_dir = dir.path().join("work");
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let onnx_bytes = onnx_fixture::build_tiny_upscale_onnx(2);
+        let sha = sha256_bytes(&onnx_bytes);
+        let staged_onnx = dir.path().join("esrgan_x2_fixture.onnx");
+        fs::write(&staged_onnx, &onnx_bytes).unwrap();
+
+        let manifest = ModelsManifest {
+            schema_version: 1,
+            updated_at: "2026-11-27".into(),
+            models: vec![AiModelSpec {
+                id: "upscale.realesrgan_x2plus".into(),
+                display_name: "Real-ESRGAN x2plus Fixture".into(),
+                task: AiTask::Upscale,
+                url: "https://example.com/x2.onnx".into(),
+                size_bytes: onnx_bytes.len() as u64,
+                sha256: sha.clone(),
+                license: "BSD-3-Clause".into(),
+                source_url: "https://github.com/xinntao/Real-ESRGAN".into(),
+                attribution: "Real-ESRGAN (BSD-3-Clause)".into(),
+                description: "Test fixture".into(),
+                default_for_task: true,
+                language: None,
+                scale: Some(2),
+                files: vec![ModelFileEntry {
+                    role: "primary".into(),
+                    filename: "real_esrgan_x2.onnx".into(),
+                    url: "https://example.com/x2.onnx".into(),
+                    size_bytes: onnx_bytes.len() as u64,
+                    sha256: sha,
+                }],
+            }],
+        };
+
+        let hub = Arc::new(AiRuntimeHub::with_manifest(models_dir, manifest).unwrap());
+        let tool = AiUpscaleTool::new(Arc::clone(&hub));
+
+        // 173×119 odd dimensions (not divisible by 4!) to exercise divisible-by-4 border padding + multi-tile blending
+        let grad_path = work_dir.join("gradient_odd.png");
+        let mut grad = ImageBuffer::new(173, 119);
+        for (x, y, px) in grad.enumerate_pixels_mut() {
+            let r = ((x * 200) / 173 + 20) as u8;
+            let g = ((y * 180) / 119 + 30) as u8;
+            *px = Rgba([r, g, 140, 255]);
+        }
+        grad.save(&grad_path).unwrap();
+
+        let make_ctx = |inputs: Vec<std::path::PathBuf>, opts: ToolOptions| {
+            ToolContext::new(
+                "test-upscale",
+                inputs,
+                opts,
+                None,
+                CancelHandle::new(),
+                Arc::new(|_, _| {}),
+            )
+        };
+
+        // 1. Before ANY model is installed: Lanczos3 fallback works offline immediately!
+        let mut fb_opts = ToolOptions::new();
+        fb_opts.insert("scale", json!("2"));
+        fb_opts.insert("model_id", json!(LANCZOS_FALLBACK_ID));
+        let fb_res = tool
+            .run(&make_ctx(vec![grad_path.clone()], fb_opts))
+            .unwrap();
+        let fb_out = core_image::load_image_any(Path::new(&fb_res.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((fb_out.width(), fb_out.height()), (346, 238));
+
+        // 2. Install ONNX fixture and run tiled 2× super-resolution with small 32px tiles (6×4 = 24 tiles!)
+        hub.manager()
+            .unwrap()
+            .import_offline_model("upscale.realesrgan_x2plus", &staged_onnx)
+            .unwrap();
+
+        let mut tile_opts = ToolOptions::new();
+        tile_opts.insert("scale", json!("2"));
+        tile_opts.insert("model_id", json!("upscale.realesrgan_x2plus"));
+        tile_opts.insert("tile_size", json!("32"));
+        tile_opts.insert("output_format", json!("png"));
+        let tile_res = tool
+            .run(&make_ctx(vec![grad_path.clone()], tile_opts))
+            .unwrap();
+        let tile_out = core_image::load_image_any(Path::new(&tile_res.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((tile_out.width(), tile_out.height()), (346, 238));
+
+        // Verify zero seam spikes across all horizontal & vertical tile boundaries!
+        for x in 1..(tile_out.width() - 1) {
+            let left = tile_out.get_pixel(x - 1, 100)[0] as i32;
+            let cur = tile_out.get_pixel(x, 100)[0] as i32;
+            assert!(
+                (cur - left).abs() <= 3,
+                "Detected seam jump at x={x}: {left} -> {cur}"
+            );
+        }
+        for y in 1..(tile_out.height() - 1) {
+            let up = tile_out.get_pixel(150, y - 1)[1] as i32;
+            let cur = tile_out.get_pixel(150, y)[1] as i32;
+            assert!(
+                (cur - up).abs() <= 4,
+                "Detected seam jump at y={y}: {up} -> {cur}"
+            );
+        }
+
+        // 3. Two-pass 4× enlargement with the x2 model -> exact 692×476
+        let mut x4_opts = ToolOptions::new();
+        x4_opts.insert("scale", json!("4"));
+        x4_opts.insert("model_id", json!("upscale.realesrgan_x2plus"));
+        x4_opts.insert("tile_size", json!("64"));
+        let x4_res = tool
+            .run(&make_ctx(vec![grad_path.clone()], x4_opts))
+            .unwrap();
+        let x4_out = core_image::load_image_any(Path::new(&x4_res.outputs[0].path))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!((x4_out.width(), x4_out.height()), (692, 476));
     }
 }

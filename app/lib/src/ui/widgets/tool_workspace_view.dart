@@ -436,6 +436,16 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                           onChanged: (next) =>
                               setState(() => _optionValues = next),
                         ),
+                        if (widget.tool.id == 'ai.upscale' &&
+                            _selectedPaths.isNotEmpty)
+                          UpscalePreRunBanner(
+                            selectedPaths: _selectedPaths,
+                            scaleFactor: int.tryParse(
+                                  _optionValues['scale']?.toString() ?? '2',
+                                ) ??
+                                2,
+                            backend: widget.controller.backend,
+                          ),
                         const SizedBox(height: 20),
                         const Divider(),
                         const SizedBox(height: 14),

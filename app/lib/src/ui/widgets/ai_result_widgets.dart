@@ -480,3 +480,154 @@ class _CheckerboardPainter extends CustomPainter {
     return oldDelegate.isDark != isDark || oldDelegate.cellSize != cellSize;
   }
 }
+
+/// Pre-run output resolution preview & large-output warning banner for `ai.upscale`.
+class UpscalePreRunBanner extends StatefulWidget {
+  final List<String> selectedPaths;
+  final int scaleFactor;
+  final ToolCenterBackend backend;
+
+  const UpscalePreRunBanner({
+    super.key,
+    required this.selectedPaths,
+    required this.scaleFactor,
+    required this.backend,
+  });
+
+  @override
+  State<UpscalePreRunBanner> createState() => _UpscalePreRunBannerState();
+}
+
+class _UpscalePreRunBannerState extends State<UpscalePreRunBanner> {
+  static final RegExp _dimRegex = RegExp(r'(\d+)\s*[×xX]\s*(\d+)');
+  List<({String name, int w, int h})> _dims = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _inspectDimensions();
+  }
+
+  @override
+  void didUpdateWidget(covariant UpscalePreRunBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedPaths.join('|') != widget.selectedPaths.join('|')) {
+      _inspectDimensions();
+    }
+  }
+
+  Future<void> _inspectDimensions() async {
+    final next = <({String name, int w, int h})>[];
+    for (final path in widget.selectedPaths.take(8)) {
+      try {
+        final info = await widget.backend.inspectFile(path);
+        for (final meta in info.metadata) {
+          if (meta.label == 'Dimensions') {
+            final match = _dimRegex.firstMatch(meta.value);
+            if (match != null) {
+              final w = int.tryParse(match.group(1)!) ?? 0;
+              final h = int.tryParse(match.group(2)!) ?? 0;
+              if (w > 0 && h > 0) {
+                next.add((name: p.basename(path), w: w, h: h));
+              }
+            }
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _dims = next;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_dims.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final s = widget.scaleFactor.clamp(2, 4);
+
+    int maxOutPixels = 0;
+    for (final d in _dims) {
+      final px = (d.w * s) * (d.h * s);
+      if (px > maxOutPixels) maxOutPixels = px;
+    }
+
+    final isVeryLarge = maxOutPixels >= 25000000;
+    final exceedsLimit = maxOutPixels > 140000000;
+    final first = _dims.first;
+    final outW = first.w * s;
+    final outH = first.h * s;
+    final mp = (outW * outH) / 1000000.0;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: exceedsLimit
+            ? scheme.errorContainer
+            : isVeryLarge
+                ? Colors.amber.withValues(alpha: 0.14)
+                : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(
+          color: exceedsLimit
+              ? scheme.error
+              : isVeryLarge
+                  ? Colors.amber.shade700
+                  : scheme.outlineVariant,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isVeryLarge
+                    ? Icons.warning_amber_rounded
+                    : Icons.aspect_ratio_rounded,
+                size: 18,
+                color: exceedsLimit
+                    ? scheme.onErrorContainer
+                    : isVeryLarge
+                        ? Colors.amber.shade800
+                        : scheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _dims.length == 1
+                      ? 'Output Size: ${first.w}×${first.h} px → $outW×$outH px ($s× • ${mp.toStringAsFixed(1)} MP)'
+                      : 'Batch Output (${_dims.length} files): e.g. ${first.w}×${first.h} → $outW×$outH px ($s×)',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: exceedsLimit ? scheme.onErrorContainer : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (exceedsLimit) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Output exceeds 140 MP safety ceiling. Switch to 2× or resize the input image first.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onErrorContainer,
+              ),
+            ),
+          ] else if (isVeryLarge) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Large output warning (${(maxOutPixels / 1000000.0).toStringAsFixed(1)} MP): processing will use tiled inference to keep RAM bounded, and saving PNG may take several seconds.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
