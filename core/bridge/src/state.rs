@@ -32,5 +32,6 @@ fn build_default_registry() -> ToolRegistry {
     let registry = ToolRegistry::new();
     core_image::register_image_tools(&registry);
     core_pdf::register_pdf_tools(&registry);
+    core_media::register_media_tools(&registry);
     registry
 }
