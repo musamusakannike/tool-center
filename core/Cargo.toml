@@ -26,6 +26,10 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 image = { version = "0.25", default-features = false, features = ["rayon", "avif", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
+fast_image_resize = { version = "6.2", features = ["rayon"] }
+oxipng = { version = "10.2", default-features = false, features = ["parallel", "zopfli"] }
+mozjpeg-rs = "0.9"
+img-parts = "0.4"
 kamadak-exif = "0.6"
 pdfium-render = { version = "0.9", features = ["pdfium_latest", "image_latest", "thread_safe"] }
 lopdf = "0.47"

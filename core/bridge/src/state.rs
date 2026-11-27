@@ -29,5 +29,7 @@ pub fn engine() -> &'static EngineState {
 }
 
 fn build_default_registry() -> ToolRegistry {
-    ToolRegistry::new()
+    let registry = ToolRegistry::new();
+    core_image::register_image_tools(&registry);
+    registry
 }
