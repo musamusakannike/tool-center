@@ -7,10 +7,13 @@ repository.workspace = true
 
 [dependencies]
 core-jobs = { path = "../core-jobs" }
+core-image = { path = "../core-image" }
 image.workspace = true
 lopdf.workspace = true
 pdfium-render.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

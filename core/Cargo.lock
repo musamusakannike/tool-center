@@ -516,12 +516,15 @@ dependencies = [
 name = "core-pdf"
 version = "0.1.0"
 dependencies = [
+ "core-image",
  "core-jobs",
  "image",
  "lopdf",
  "pdfium-render",
  "serde",
+ "serde_json",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
