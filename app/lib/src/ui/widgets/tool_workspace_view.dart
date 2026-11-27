@@ -10,6 +10,8 @@ import '../../models/tool_models.dart';
 import '../../services/core_service.dart';
 import '../../state/app_controller.dart';
 import '../theme/app_theme.dart';
+import 'ai_result_widgets.dart';
+import 'models_view.dart';
 import 'schema_options_form.dart';
 
 class ToolWorkspaceView extends StatefulWidget {
@@ -60,6 +62,20 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
     if (id == null) return null;
     for (final j in widget.controller.jobs) {
       if (j.jobId == id) return j;
+    }
+    return null;
+  }
+
+  AiModelStatusModel? get _missingRequiredModel {
+    final selectedModelId = _optionValues['model_id']?.toString();
+    if (selectedModelId == null ||
+        selectedModelId.isEmpty ||
+        selectedModelId == 'lanczos_fallback') {
+      return null;
+    }
+    final status = widget.controller.aiCatalog?.findById(selectedModelId);
+    if (status != null && !status.installed) {
+      return status;
     }
     return null;
   }
@@ -420,6 +436,16 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                           onChanged: (next) =>
                               setState(() => _optionValues = next),
                         ),
+                        if (widget.tool.id == 'ai.upscale' &&
+                            _selectedPaths.isNotEmpty)
+                          UpscalePreRunBanner(
+                            selectedPaths: _selectedPaths,
+                            scaleFactor: int.tryParse(
+                                  _optionValues['scale']?.toString() ?? '2',
+                                ) ??
+                                2,
+                            backend: widget.controller.backend,
+                          ),
                         const SizedBox(height: 20),
                         const Divider(),
                         const SizedBox(height: 14),
@@ -489,6 +515,14 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                   const SizedBox(height: 16),
                 ],
 
+                if (_missingRequiredModel != null) ...[
+                  MissingModelPromptCard(
+                    model: _missingRequiredModel!,
+                    controller: widget.controller,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
                 // Run / Cancel Action Row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -503,7 +537,9 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                       const SizedBox(width: 12),
                     ],
                     FilledButton.icon(
-                      onPressed: isRunning || _selectedPaths.isEmpty
+                      onPressed: isRunning ||
+                              _selectedPaths.isEmpty ||
+                              _missingRequiredModel != null
                           ? null
                           : _runTool,
                       icon: isRunning
@@ -525,6 +561,7 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
                   const SizedBox(height: 20),
                   _JobResultSection(
                     job: job,
+                    backend: widget.controller.backend,
                     onPreviewOutput: widget.controller.openPreview,
                   ),
                 ],
@@ -539,9 +576,14 @@ class _ToolWorkspaceViewState extends State<ToolWorkspaceView> {
 
 class _JobResultSection extends StatelessWidget {
   final JobSnapshotModel job;
+  final ToolCenterBackend backend;
   final ValueChanged<String> onPreviewOutput;
 
-  const _JobResultSection({required this.job, required this.onPreviewOutput});
+  const _JobResultSection({
+    required this.job,
+    required this.backend,
+    required this.onPreviewOutput,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -629,6 +671,13 @@ class _JobResultSection extends StatelessWidget {
                     style: TextStyle(color: Colors.amber.shade800),
                   ),
               ],
+              if (AiJobResultEnhancement.isAiVisualReport(job.reportJson)) ...[
+                const SizedBox(height: 16),
+                AiJobResultEnhancement(
+                  rawReportJson: job.reportJson!,
+                  backend: backend,
+                ),
+              ],
               if (job.outputs.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 for (final out in job.outputs)
@@ -658,7 +707,8 @@ class _JobResultSection extends StatelessWidget {
                     ),
                   ),
               ],
-              if (job.reportJson != null) ...[
+              if (job.reportJson != null &&
+                  !AiJobResultEnhancement.isAiVisualReport(job.reportJson)) ...[
                 const SizedBox(height: 12),
                 _StructuredReportView(rawJson: job.reportJson!),
               ],

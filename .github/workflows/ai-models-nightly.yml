@@ -1,0 +1,39 @@
+name: AI Models Real-Weight Smoke Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 0"
+
+jobs:
+  real-model-smoke:
+    name: Download & Run Real ONNX Models
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config liblzma-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch & verify pinned LGPL FFmpeg, PDFium, and ONNX Runtime
+        run: python3 scripts/fetch_vendor.py --target linux-x64
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Download real permissive models, verify SHA-256, and run end-to-end inference
+        working-directory: core
+        run: cargo test -p core-ai real_model_download_and_inference_smoke -- --ignored --nocapture

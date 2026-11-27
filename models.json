@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-27",
+  "models": [
+    {
+      "id": "bg.u2netp",
+      "display_name": "U²-Netp (Fast General & Portrait)",
+      "task": "background_removal",
+      "default_for_task": true,
+      "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+      "size_bytes": 4574861,
+      "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/xuebinqin/U-2-Net",
+      "attribution": "Xuebin Qin et al. (U-2-Net, Apache-2.0); ONNX build hosted by danielgatis/rembg (MIT)",
+      "description": "Fast, lightweight salient-object and portrait background removal (~4.4 MB). Ideal everyday default on CPU and GPU.",
+      "files": [
+        {
+          "role": "primary",
+          "filename": "u2netp.onnx",
+          "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+          "size_bytes": 4574861,
+          "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8"
+        }
+      ]
+    },
+    {
+      "id": "bg.u2net",
+      "display_name": "U²-Net Full (High-Detail Matting)",
+      "task": "background_removal",
+      "default_for_task": false,
+      "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx",
+      "size_bytes": 175997641,
+      "sha256": "8d10d2f3bb75ae3b6d527c77944fc5e7dcd94b29809d47a739a7a728a912b491",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/xuebinqin/U-2-Net",
+      "attribution": "Xuebin Qin et al. (U-2-Net, Apache-2.0); ONNX build hosted by danielgatis/rembg (MIT)",
+      "description": "Full-capacity U²-Net model for intricate object contours, hair, and product photography.",
+      "files": [
+        {
+          "role": "primary",
+          "filename": "u2net.onnx",
+          "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx",
+          "size_bytes": 175997641,
+          "sha256": "8d10d2f3bb75ae3b6d527c77944fc5e7dcd94b29809d47a739a7a728a912b491"
+        }
+      ]
+    },
+    {
+      "id": "bg.birefnet_tiny",
+      "display_name": "BiRefNet Swin-Tiny (High-Precision Edges)",
+      "task": "background_removal",
+      "default_for_task": false,
+      "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+      "size_bytes": 224005088,
+      "sha256": "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
+      "license": "MIT",
+      "source_url": "https://github.com/ZhengPeng7/BiRefNet",
+      "attribution": "Peng Zheng et al. (BiRefNet, MIT License)",
+      "description": "High-resolution bilateral reference network with crisp fine-edge separation on complex scenes.",
+      "files": [
+        {
+          "role": "primary",
+          "filename": "BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+          "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+          "size_bytes": 224005088,
+          "sha256": "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333"
+        }
+      ]
+    },
+    {
+      "id": "upscale.realesrgan_x2plus",
+      "display_name": "Real-ESRGAN x2plus (2x General Photo)",
+      "task": "upscale",
+      "scale": 2,
+      "default_for_task": true,
+      "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x2.onnx",
+      "size_bytes": 67073434,
+      "sha256": "7115ba92e8a1bfa63d68558ef006ef3d91273a068d321b1439f8bb1c9179002c",
+      "license": "BSD-3-Clause",
+      "source_url": "https://github.com/xinntao/Real-ESRGAN",
+      "attribution": "Xintao Wang et al. (Real-ESRGAN, BSD-3-Clause License)",
+      "description": "Sharp 2x photo super-resolution and JPEG artifact restoration using RRDBNet.",
+      "files": [
+        {
+          "role": "primary",
+          "filename": "real_esrgan_x2.onnx",
+          "url": "https://huggingface.co/SceneWorks/real-esrgan-onnx/resolve/main/real_esrgan_x2.onnx",
+          "size_bytes": 67073434,
+          "sha256": "7115ba92e8a1bfa63d68558ef006ef3d91273a068d321b1439f8bb1c9179002c"
+        }
+      ]
+    },
+    {
+      "id": "upscale.realesrgan_x4plus",
+      "display_name": "Real-ESRGAN x4plus (4x General Photo)",
+      "task": "upscale",
+      "scale": 4,
+      "default_for_task": false,
+      "url": "https://huggingface.co/thisismert/real-esrgan-onnx/resolve/main/onnx/RealESRGAN_x4plus.onnx",
+      "size_bytes": 67051640,
+      "sha256": "bf63beab74f7be18123d07f47e686367ff44d4b937fb0555d561fce10f1c468d",
+      "license": "BSD-3-Clause",
+      "source_url": "https://github.com/xinntao/Real-ESRGAN",
+      "attribution": "Xintao Wang et al. (Real-ESRGAN, BSD-3-Clause License)",
+      "description": "High-detail 4x super-resolution for photographs, scans, and low-resolution images.",
+      "files": [
+        {
+          "role": "primary",
+          "filename": "RealESRGAN_x4plus.onnx",
+          "url": "https://huggingface.co/thisismert/real-esrgan-onnx/resolve/main/onnx/RealESRGAN_x4plus.onnx",
+          "size_bytes": 67051640,
+          "sha256": "bf63beab74f7be18123d07f47e686367ff44d4b937fb0555d561fce10f1c468d"
+        }
+      ]
+    },
+    {
+      "id": "upscale.realesrgan_x4plus_anime",
+      "display_name": "Real-ESRGAN x4plus Anime 6B (4x Anime & Illustration)",
+      "task": "upscale",
+      "scale": 4,
+      "default_for_task": false,
+      "url": "https://huggingface.co/thisismert/real-esrgan-onnx/resolve/main/onnx/RealESRGAN_x4plus_anime_6B.onnx",
+      "size_bytes": 17939965,
+      "sha256": "eaccc72bee5ac97e5eaaf9c29323427d641b6d5774f965e3e23185ce6f6637ee",
+      "license": "BSD-3-Clause",
+      "source_url": "https://github.com/xinntao/Real-ESRGAN",
+      "attribution": "Xintao Wang et al. (Real-ESRGAN, BSD-3-Clause License)",
+      "description": "Compact 6-block 4x upscaler tuned specifically for anime, line art, diagrams, and illustrations.",
+      "files": [
+        {
+          "role": "primary",
+          "filename": "RealESRGAN_x4plus_anime_6B.onnx",
+          "url": "https://huggingface.co/thisismert/real-esrgan-onnx/resolve/main/onnx/RealESRGAN_x4plus_anime_6B.onnx",
+          "size_bytes": 17939965,
+          "sha256": "eaccc72bee5ac97e5eaaf9c29323427d641b6d5774f965e3e23185ce6f6637ee"
+        }
+      ]
+    },
+    {
+      "id": "ocr.ppocr_v4_en",
+      "display_name": "PP-OCRv4 English & Latin Pack",
+      "task": "ocr",
+      "language": "en",
+      "default_for_task": true,
+      "url": "https://huggingface.co/breezedeus/cnocr-ppocr-en_PP-OCRv4/resolve/main/en_PP-OCRv4_rec_infer.onnx",
+      "size_bytes": 10665748,
+      "sha256": "5ca59a096cf493d5fd5044b9ccc1bdea9229fbcf656bd76040ff80a00201ee16",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/PaddlePaddle/PaddleOCR",
+      "attribution": "PaddleOCR Contributors & RapidAI/RapidOCR (Apache-2.0 License)",
+      "description": "Complete English & Latin OCR pipeline: DBNet text detector + angle classifier + PP-OCRv4 recognizer.",
+      "files": [
+        {
+          "role": "det",
+          "filename": "en_PP-OCRv3_det_infer.onnx",
+          "url": "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/en_PP-OCRv3_det_infer.onnx",
+          "size_bytes": 2423224,
+          "sha256": "f139598bc2af4e4b6fe98dec11574e30edfdd91fc94ac1425c18ace3bd5a866b"
+        },
+        {
+          "role": "cls",
+          "filename": "ch_ppocr_mobile_v2.0_cls_infer.onnx",
+          "url": "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv1/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+          "size_bytes": 585532,
+          "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"
+        },
+        {
+          "role": "rec",
+          "filename": "en_PP-OCRv4_rec_infer.onnx",
+          "url": "https://huggingface.co/breezedeus/cnocr-ppocr-en_PP-OCRv4/resolve/main/en_PP-OCRv4_rec_infer.onnx",
+          "size_bytes": 7656802,
+          "sha256": "5ca59a096cf493d5fd5044b9ccc1bdea9229fbcf656bd76040ff80a00201ee16"
+        },
+        {
+          "role": "dict",
+          "filename": "en_dict.txt",
+          "url": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf/ppocr/utils/en_dict.txt",
+          "size_bytes": 190,
+          "sha256": "5662df9d2d03f0e8ca0d3b0649d6acbab904b6a14b3d3521463c71c37c668ce3"
+        }
+      ]
+    },
+    {
+      "id": "ocr.ppocr_v4_ch_en",
+      "display_name": "PP-OCRv4 Multilingual (Chinese + English) Pack",
+      "task": "ocr",
+      "language": "ch_en",
+      "default_for_task": false,
+      "url": "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx",
+      "size_bytes": 16215257,
+      "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/PaddlePaddle/PaddleOCR",
+      "attribution": "PaddleOCR Contributors & RapidAI/RapidOCR (Apache-2.0 License)",
+      "description": "Optional multilingual OCR language pack supporting Chinese, English, digits, and punctuation.",
+      "files": [
+        {
+          "role": "det",
+          "filename": "ch_PP-OCRv4_det_infer.onnx",
+          "url": "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx",
+          "size_bytes": 4745517,
+          "sha256": "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9"
+        },
+        {
+          "role": "cls",
+          "filename": "ch_ppocr_mobile_v2.0_cls_infer.onnx",
+          "url": "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv1/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+          "size_bytes": 585532,
+          "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"
+        },
+        {
+          "role": "rec",
+          "filename": "ch_PP-OCRv4_rec_infer.onnx",
+          "url": "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx",
+          "size_bytes": 10857958,
+          "sha256": "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b"
+        },
+        {
+          "role": "dict",
+          "filename": "ppocr_keys_v1.txt",
+          "url": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf/ppocr/utils/ppocr_keys_v1.txt",
+          "size_bytes": 26250,
+          "sha256": "a1c84d9bdb9ab29043c58896224d32941783eb821629618416dcb08f12886492"
+        }
+      ]
+    }
+  ]
+}

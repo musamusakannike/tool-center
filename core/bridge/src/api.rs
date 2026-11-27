@@ -1,13 +1,12 @@
 use crate::frb_generated::StreamSink;
 use crate::preview::{inspect_file_full, read_bounded_text_preview};
 use crate::state::engine;
-use core_ai::{flagged_excluded_models, ModelManager};
+use core_ai::AiDevicePreference;
 use core_image::render_image_preview_png;
 use core_jobs::{JobRequest, ToolOptions};
 use core_pdf::render_pdf_page_to_png;
 use flutter_rust_bridge::frb;
-use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Returns the Tool Center Rust core version string.
 #[frb(sync)]
@@ -161,21 +160,103 @@ pub async fn get_pdf_page_count(path: String, password: Option<String>) -> Resul
     .map_err(|e| format!("PDF worker error: {e}"))?
 }
 
-/// Returns the v2 permissive-licensed ONNX model catalog, cache status, and excluded non-commercial models.
+/// Returns the v2 permissive-licensed ONNX model catalog, settings, live download state, and excluded models.
 pub fn list_ai_models_json(cache_dir: String) -> Result<String, String> {
-    let mgr = ModelManager::with_default_catalog(cache_dir).map_err(|e| e.to_string())?;
-    let payload = json!({
-        "models": mgr.list_models(),
-        "flagged_excluded": flagged_excluded_models(),
-    });
+    let ai = &engine().ai;
+    ai.update_default_dir_if_unset(Path::new(&cache_dir));
+    let payload = ai.catalog_payload().map_err(|e| e.to_string())?;
     serde_json::to_string(&payload).map_err(|e| e.to_string())
 }
 
-/// Deletes a cached on-demand ONNX model file from disk.
-pub fn delete_ai_model(cache_dir: String, model_id: String) -> Result<bool, String> {
-    let mgr = ModelManager::with_default_catalog(cache_dir).map_err(|e| e.to_string())?;
-    mgr.delete_cached_model(&model_id)
+/// Streams real-time AI model catalog & download progress updates to Flutter without polling.
+pub fn subscribe_ai_model_events(sink: StreamSink<String>) -> Result<(), String> {
+    let state = engine();
+    let mut rx = state.ai.subscribe();
+    state.runtime.spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(payload) => {
+                    if sink.add(payload).is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Starts a resumable, SHA-256-verified background download for `model_id`.
+pub fn start_ai_model_download(cache_dir: String, model_id: String) -> Result<(), String> {
+    let state = engine();
+    state.ai.update_default_dir_if_unset(Path::new(&cache_dir));
+    state
+        .ai
+        .start_download(state.runtime.handle(), model_id)
         .map_err(|e| e.to_string())
+}
+
+/// Cancels an active model download (keeping `.part` bytes on disk for instant resume).
+#[frb(sync)]
+pub fn cancel_ai_model_download(model_id: String) -> bool {
+    engine().ai.cancel_download(&model_id)
+}
+
+/// Sets or resets a custom model storage directory.
+pub fn set_ai_models_dir(cache_dir: String, custom_dir: Option<String>) -> Result<String, String> {
+    let ai = &engine().ai;
+    ai.update_default_dir_if_unset(Path::new(&cache_dir));
+    let normalized = custom_dir
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let resolved = ai
+        .set_custom_models_dir(normalized)
+        .map_err(|e| e.to_string())?;
+    Ok(resolved.display().to_string())
+}
+
+/// Sets the ONNX Runtime hardware execution provider preference (`auto`, `cpu`, `coreml`, `directml`, `cuda`).
+#[frb(sync)]
+pub fn set_ai_device_preference(preference: String) {
+    engine()
+        .ai
+        .set_device_preference(AiDevicePreference::from_str_lossy(&preference));
+}
+
+/// Manually imports a local `.onnx` file or model pack directory for offline machines after verifying SHA-256.
+pub async fn import_ai_model_path(
+    cache_dir: String,
+    model_id: String,
+    source_path: String,
+) -> Result<String, String> {
+    let state = engine();
+    state.ai.update_default_dir_if_unset(Path::new(&cache_dir));
+    let ai = state.ai.clone();
+    let src = PathBuf::from(source_path);
+    let installed_dir = tokio::task::spawn_blocking(move || {
+        let mgr = ai.manager().map_err(|e| e.to_string())?;
+        let res = mgr
+            .import_offline_model(&model_id, &src)
+            .map_err(|e| e.to_string())?;
+        ai.broadcast_catalog();
+        Ok::<PathBuf, String>(res)
+    })
+    .await
+    .map_err(|e| format!("Model import worker error: {e}"))??;
+    Ok(installed_dir.display().to_string())
+}
+
+/// Deletes an installed or partially downloaded AI model from disk.
+pub fn delete_ai_model(cache_dir: String, model_id: String) -> Result<bool, String> {
+    let ai = &engine().ai;
+    ai.update_default_dir_if_unset(Path::new(&cache_dir));
+    let mgr = ai.manager().map_err(|e| e.to_string())?;
+    let removed = mgr.delete_model(&model_id).map_err(|e| e.to_string())?;
+    ai.broadcast_catalog();
+    Ok(removed)
 }
 
 #[cfg(test)]
@@ -189,9 +270,13 @@ mod tests {
         assert_eq!(core_version(), "0.1.0");
         let tools_raw = list_tools_json();
         let tools: Vec<serde_json::Value> = serde_json::from_str(&tools_raw).unwrap();
-        assert_eq!(tools.len(), 38, "Expected all 38 v1 tools to be registered");
+        assert_eq!(
+            tools.len(),
+            41,
+            "Expected all 38 v1 tools + 3 v2 AI tools (41 total) to be registered"
+        );
 
-        for cat in ["images", "video", "audio", "pdf", "files", "convert"] {
+        for cat in ["ai", "images", "video", "audio", "pdf", "files", "convert"] {
             assert!(
                 tools.iter().any(|t| t["category"] == cat),
                 "Missing tools in category {cat}"
@@ -213,6 +298,12 @@ mod tests {
             }
         }
         assert!(list_jobs_json().starts_with('['));
+
+        // Cold-start performance guard: listing all 41 tools must NEVER eagerly load ONNX Runtime!
+        assert!(
+            !core_ai::is_ort_environment_loaded(),
+            "ONNX Runtime must remain unloaded at startup and idle until an AI job runs"
+        );
     }
 
     #[tokio::test]
@@ -245,5 +336,9 @@ mod tests {
         let json = list_ai_models_json(dir.display().to_string()).unwrap();
         assert!(json.contains("Apache-2.0"));
         assert!(json.contains("flagged_excluded"));
+        assert!(
+            !core_ai::is_ort_environment_loaded(),
+            "Listing AI model catalog must not eagerly load ONNX Runtime"
+        );
     }
 }

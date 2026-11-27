@@ -120,6 +120,7 @@ jobs:
           mkdir -p "${APP_BUNDLE}/Contents/Frameworks" "${APP_BUNDLE}/Contents/Resources"
           cp core/target/release/libbridge.dylib "${APP_BUNDLE}/Contents/Frameworks/"
           cp vendor/macos-universal/pdfium/lib/libpdfium.dylib "${APP_BUNDLE}/Contents/Frameworks/"
+          cp vendor/macos-universal/onnxruntime/lib/libonnxruntime.dylib "${APP_BUNDLE}/Contents/Frameworks/"
           cp -R vendor/macos-universal/ffmpeg "${APP_BUNDLE}/Contents/Resources/ffmpeg"
 
       - name: Optional Apple Developer ID Code Signing
@@ -143,6 +144,8 @@ jobs:
               "${APP_BUNDLE}/Contents/Resources/ffmpeg/bin/ffmpeg"
             codesign --force --options runtime --timestamp --sign "${APPLE_SIGNING_IDENTITY}" \
               "${APP_BUNDLE}/Contents/Frameworks/libpdfium.dylib"
+            codesign --force --options runtime --timestamp --sign "${APPLE_SIGNING_IDENTITY}" \
+              "${APP_BUNDLE}/Contents/Frameworks/libonnxruntime.dylib"
             codesign --force --options runtime --timestamp --sign "${APPLE_SIGNING_IDENTITY}" \
               "${APP_BUNDLE}/Contents/Frameworks/libbridge.dylib"
             codesign --deep --force --options runtime --timestamp \

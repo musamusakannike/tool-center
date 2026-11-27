@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 enum ToolCategoryId {
+  ai,
   images,
   video,
   audio,
@@ -10,6 +11,8 @@ enum ToolCategoryId {
 
   static ToolCategoryId fromString(String raw) {
     switch (raw.toLowerCase()) {
+      case 'ai':
+        return ToolCategoryId.ai;
       case 'images':
         return ToolCategoryId.images;
       case 'video':
@@ -399,38 +402,162 @@ class JobSnapshotModel {
   }
 }
 
+enum ModelInstallStateId {
+  notInstalled,
+  downloading,
+  ready,
+  failed;
+
+  static ModelInstallStateId fromString(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'downloading':
+        return ModelInstallStateId.downloading;
+      case 'ready':
+        return ModelInstallStateId.ready;
+      case 'failed':
+        return ModelInstallStateId.failed;
+      case 'not_installed':
+      default:
+        return ModelInstallStateId.notInstalled;
+    }
+  }
+}
+
+class ModelFileEntryModel {
+  final String role;
+  final String filename;
+  final int sizeBytes;
+  final String sha256;
+
+  const ModelFileEntryModel({
+    required this.role,
+    required this.filename,
+    required this.sizeBytes,
+    required this.sha256,
+  });
+
+  factory ModelFileEntryModel.fromJson(Map<String, dynamic> json) {
+    return ModelFileEntryModel(
+      role: json['role']?.toString() ?? 'primary',
+      filename: json['filename']?.toString() ?? '',
+      sizeBytes: (json['size_bytes'] as num?)?.toInt() ?? 0,
+      sha256: json['sha256']?.toString() ?? '',
+    );
+  }
+}
+
 class AiModelStatusModel {
   final String id;
-  final String name;
-  final String capability;
+  final String displayName;
+  final String task;
+  final bool defaultForTask;
+  final String? language;
+  final int? scale;
   final String spdxLicense;
+  final String sourceUrl;
+  final String attribution;
   final String description;
   final int sizeBytes;
+  final String sha256;
+  final List<ModelFileEntryModel> files;
+  final ModelInstallStateId state;
   final bool installed;
-  final bool v2Planned;
+  final int resumableBytes;
+  final int downloadedBytes;
+  final double progress;
+  final String? statusMessage;
+  final String? errorMessage;
+  final String? localDir;
 
   const AiModelStatusModel({
     required this.id,
-    required this.name,
-    required this.capability,
+    required this.displayName,
+    required this.task,
+    this.defaultForTask = false,
+    this.language,
+    this.scale,
     required this.spdxLicense,
+    required this.sourceUrl,
+    required this.attribution,
     required this.description,
     required this.sizeBytes,
+    required this.sha256,
+    this.files = const [],
+    required this.state,
     required this.installed,
-    required this.v2Planned,
+    this.resumableBytes = 0,
+    this.downloadedBytes = 0,
+    this.progress = 0.0,
+    this.statusMessage,
+    this.errorMessage,
+    this.localDir,
   });
+
+  bool get isMultiFilePack => files.length > 1;
 
   factory AiModelStatusModel.fromJson(Map<String, dynamic> json) {
     final spec = json['spec'] as Map<String, dynamic>? ?? const {};
     return AiModelStatusModel(
       id: spec['id']?.toString() ?? '',
-      name: spec['name']?.toString() ?? '',
-      capability: spec['capability']?.toString() ?? '',
-      spdxLicense: spec['spdx_license']?.toString() ?? '',
+      displayName:
+          spec['display_name']?.toString() ?? spec['name']?.toString() ?? '',
+      task: spec['task']?.toString() ?? spec['capability']?.toString() ?? '',
+      defaultForTask: spec['default_for_task'] as bool? ?? false,
+      language: spec['language']?.toString(),
+      scale: (spec['scale'] as num?)?.toInt(),
+      spdxLicense:
+          spec['license']?.toString() ??
+          spec['spdx_license']?.toString() ??
+          '',
+      sourceUrl:
+          spec['source_url']?.toString() ??
+          spec['source_repo']?.toString() ??
+          '',
+      attribution: spec['attribution']?.toString() ?? '',
       description: spec['description']?.toString() ?? '',
       sizeBytes: (spec['size_bytes'] as num?)?.toInt() ?? 0,
+      sha256: spec['sha256']?.toString() ?? '',
+      files: (spec['files'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(ModelFileEntryModel.fromJson)
+          .toList(),
+      state: ModelInstallStateId.fromString(
+        json['state']?.toString() ??
+            ((json['installed'] as bool? ?? false) ? 'ready' : 'not_installed'),
+      ),
       installed: json['installed'] as bool? ?? false,
-      v2Planned: json['v2_planned'] as bool? ?? true,
+      resumableBytes: (json['resumable_bytes'] as num?)?.toInt() ?? 0,
+      downloadedBytes: (json['downloaded_bytes'] as num?)?.toInt() ?? 0,
+      progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+      statusMessage: json['status_message']?.toString(),
+      errorMessage: json['error_message']?.toString(),
+      localDir: json['local_dir']?.toString(),
+    );
+  }
+}
+
+class AiSettingsModel {
+  final String modelsDir;
+  final bool isCustomDir;
+  final String devicePreference;
+  final List<String> availableProviders;
+
+  const AiSettingsModel({
+    required this.modelsDir,
+    required this.isCustomDir,
+    required this.devicePreference,
+    required this.availableProviders,
+  });
+
+  factory AiSettingsModel.fromJson(Map<String, dynamic> json) {
+    return AiSettingsModel(
+      modelsDir: json['models_dir']?.toString() ?? '',
+      isCustomDir: json['is_custom_dir'] as bool? ?? false,
+      devicePreference: json['device_preference']?.toString() ?? 'auto',
+      availableProviders:
+          (json['available_providers'] as List<dynamic>? ?? const ['cpu'])
+              .map((e) => e.toString())
+              .toList(),
     );
   }
 }
@@ -451,6 +578,45 @@ class FlaggedExcludedModelInfo {
       name: json['name']?.toString() ?? '',
       upstreamLicense: json['upstream_license']?.toString() ?? '',
       reason: json['reason']?.toString() ?? '',
+    );
+  }
+}
+
+class AiModelsCatalogModel {
+  final int schemaVersion;
+  final AiSettingsModel settings;
+  final List<AiModelStatusModel> models;
+  final List<FlaggedExcludedModelInfo> flaggedExcluded;
+
+  const AiModelsCatalogModel({
+    required this.schemaVersion,
+    required this.settings,
+    required this.models,
+    required this.flaggedExcluded,
+  });
+
+  AiModelStatusModel? findById(String id) {
+    for (final m in models) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  factory AiModelsCatalogModel.fromJsonStr(String raw) {
+    final map = jsonDecode(raw) as Map<String, dynamic>;
+    return AiModelsCatalogModel(
+      schemaVersion: (map['schema_version'] as num?)?.toInt() ?? 1,
+      settings: AiSettingsModel.fromJson(
+        map['settings'] as Map<String, dynamic>? ?? const {},
+      ),
+      models: (map['models'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(AiModelStatusModel.fromJson)
+          .toList(),
+      flaggedExcluded: (map['flagged_excluded'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(FlaggedExcludedModelInfo.fromJson)
+          .toList(),
     );
   }
 }

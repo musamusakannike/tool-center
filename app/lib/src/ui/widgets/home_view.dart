@@ -31,6 +31,8 @@ class _HomeViewState extends State<HomeView> {
   String _categoryLabel(AppLocalizations l10n, ToolCategoryId? cat) {
     if (cat == null) return l10n.categoryAll;
     switch (cat) {
+      case ToolCategoryId.ai:
+        return l10n.categoryAi;
       case ToolCategoryId.images:
         return l10n.categoryImages;
       case ToolCategoryId.video:
@@ -142,6 +144,7 @@ class _HomeViewState extends State<HomeView> {
                   children: [
                     for (final cat in <ToolCategoryId?>[
                       null,
+                      ToolCategoryId.ai,
                       ToolCategoryId.images,
                       ToolCategoryId.video,
                       ToolCategoryId.audio,

@@ -39,13 +39,23 @@ abstract class ToolCenterBackend {
     String? password,
   });
   Future<int> getPdfPageCount(String path, {String? password});
-  Future<(List<AiModelStatusModel>, List<FlaggedExcludedModelInfo>)>
-  listAiModels();
+
+  Future<AiModelsCatalogModel> getAiCatalog();
+  Stream<AiModelsCatalogModel> subscribeAiCatalog();
+  Future<void> startAiModelDownload(String modelId);
+  bool cancelAiModelDownload(String modelId);
+  Future<String> setAiModelsDir(String? customDir);
+  void setAiDevicePreference(String preference);
+  Future<String> importAiModel({
+    required String modelId,
+    required String sourcePath,
+  });
   Future<bool> deleteAiModel(String modelId);
 }
 
 class RustBridgeBackend implements ToolCenterBackend {
   static bool _initialized = false;
+  String? _cachedDefaultAiDir;
 
   @override
   Future<void> initialize() async {
@@ -174,29 +184,69 @@ class RustBridgeBackend implements ToolCenterBackend {
   }
 
   Future<String> _resolveAiCacheDir() async {
+    if (_cachedDefaultAiDir != null) return _cachedDefaultAiDir!;
     try {
-      final supportDir = await getApplicationSupportDirectory();
-      return p.join(supportDir.path, 'ai_models');
+      final supportDir = await getApplicationSupportDirectory().timeout(
+        const Duration(milliseconds: 300),
+      );
+      _cachedDefaultAiDir = p.join(supportDir.path, 'ai_models');
+      return _cachedDefaultAiDir!;
     } catch (_) {
-      return p.join(Directory.systemTemp.path, 'tool_center_ai_models');
+      _cachedDefaultAiDir = p.join(
+        Directory.systemTemp.path,
+        'tool_center_ai_models',
+      );
+      return _cachedDefaultAiDir!;
     }
   }
 
   @override
-  Future<(List<AiModelStatusModel>, List<FlaggedExcludedModelInfo>)>
-  listAiModels() async {
+  Future<AiModelsCatalogModel> getAiCatalog() async {
     final dir = await _resolveAiCacheDir();
     final raw = await rust_api.listAiModelsJson(cacheDir: dir);
-    final map = jsonDecode(raw) as Map<String, dynamic>;
-    final models = (map['models'] as List<dynamic>? ?? [])
-        .whereType<Map<String, dynamic>>()
-        .map(AiModelStatusModel.fromJson)
-        .toList();
-    final flagged = (map['flagged_excluded'] as List<dynamic>? ?? [])
-        .whereType<Map<String, dynamic>>()
-        .map(FlaggedExcludedModelInfo.fromJson)
-        .toList();
-    return (models, flagged);
+    return AiModelsCatalogModel.fromJsonStr(raw);
+  }
+
+  @override
+  Stream<AiModelsCatalogModel> subscribeAiCatalog() {
+    return rust_api.subscribeAiModelEvents().map(
+      AiModelsCatalogModel.fromJsonStr,
+    );
+  }
+
+  @override
+  Future<void> startAiModelDownload(String modelId) async {
+    final dir = await _resolveAiCacheDir();
+    await rust_api.startAiModelDownload(cacheDir: dir, modelId: modelId);
+  }
+
+  @override
+  bool cancelAiModelDownload(String modelId) {
+    return rust_api.cancelAiModelDownload(modelId: modelId);
+  }
+
+  @override
+  Future<String> setAiModelsDir(String? customDir) async {
+    final dir = await _resolveAiCacheDir();
+    return rust_api.setAiModelsDir(cacheDir: dir, customDir: customDir);
+  }
+
+  @override
+  void setAiDevicePreference(String preference) {
+    rust_api.setAiDevicePreference(preference: preference);
+  }
+
+  @override
+  Future<String> importAiModel({
+    required String modelId,
+    required String sourcePath,
+  }) async {
+    final dir = await _resolveAiCacheDir();
+    return rust_api.importAiModelPath(
+      cacheDir: dir,
+      modelId: modelId,
+      sourcePath: sourcePath,
+    );
   }
 
   @override
@@ -212,21 +262,65 @@ class FakeToolCenterBackend implements ToolCenterBackend {
   final List<JobSnapshotModel> jobs;
   final Map<String, FileInspectionModel> mockInspections;
   final Map<String, TextPreviewModel> mockTextPreviews;
+  List<AiModelStatusModel> mockAiModels;
+  String _modelsDir = '/tmp/tool_center_ai_models';
+  bool _isCustomDir = false;
+  String _devicePref = 'auto';
+
   final StreamController<JobSnapshotModel> _events =
       StreamController<JobSnapshotModel>.broadcast();
+  final StreamController<AiModelsCatalogModel> _aiEvents =
+      StreamController<AiModelsCatalogModel>.broadcast();
 
   FakeToolCenterBackend({
     this.tools = const [],
     List<JobSnapshotModel>? jobs,
     this.mockInspections = const {},
     this.mockTextPreviews = const {},
-  }) : jobs = List<JobSnapshotModel>.from(jobs ?? const []);
+    List<AiModelStatusModel>? mockAiModels,
+  }) : jobs = List<JobSnapshotModel>.from(jobs ?? const []),
+       mockAiModels = List<AiModelStatusModel>.from(
+         mockAiModels ??
+             const [
+               AiModelStatusModel(
+                 id: 'bg.u2netp',
+                 displayName: 'U²-Netp (Fast General & Portrait)',
+                 task: 'background_removal',
+                 defaultForTask: true,
+                 spdxLicense: 'Apache-2.0',
+                 sourceUrl: 'https://github.com/xuebinqin/U-2-Net',
+                 attribution: 'Xuebin Qin et al. (Apache-2.0)',
+                 description: 'Fast salient-object background removal.',
+                 sizeBytes: 4574861,
+                 sha256:
+                     '309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8',
+                 state: ModelInstallStateId.notInstalled,
+                 installed: false,
+               ),
+               AiModelStatusModel(
+                 id: 'ocr.ppocr_v4_en',
+                 displayName: 'PP-OCRv4 English & Latin Pack',
+                 task: 'ocr',
+                 defaultForTask: true,
+                 language: 'en',
+                 spdxLicense: 'Apache-2.0',
+                 sourceUrl: 'https://github.com/PaddlePaddle/PaddleOCR',
+                 attribution: 'PaddleOCR Contributors (Apache-2.0)',
+                 description: 'Complete offline English & Latin OCR pipeline.',
+                 sizeBytes: 10665748,
+                 sha256:
+                     '5ca59a096cf493d5fd5044b9ccc1bdea9229fbcf656bd76040ff80a00201ee16',
+                 state: ModelInstallStateId.ready,
+                 installed: true,
+               ),
+             ],
+       );
 
   @override
   Future<void> initialize() async {}
 
   @override
-  String getCoreVersion() => '0.1.0-test';
+  String getCoreVersion() => '0.2.0-test';
 
   @override
   List<ToolDescriptorModel> listTools() => tools;
@@ -334,14 +428,110 @@ class FakeToolCenterBackend implements ToolCenterBackend {
   @override
   Future<int> getPdfPageCount(String path, {String? password}) async => 1;
 
-  @override
-  Future<(List<AiModelStatusModel>, List<FlaggedExcludedModelInfo>)>
-  listAiModels() async {
-    return (const <AiModelStatusModel>[], const <FlaggedExcludedModelInfo>[]);
+  AiModelsCatalogModel _buildFakeCatalog() {
+    return AiModelsCatalogModel(
+      schemaVersion: 1,
+      settings: AiSettingsModel(
+        modelsDir: _modelsDir,
+        isCustomDir: _isCustomDir,
+        devicePreference: _devicePref,
+        availableProviders: const ['cpu', 'cuda'],
+      ),
+      models: List<AiModelStatusModel>.from(mockAiModels),
+      flaggedExcluded: const [
+        FlaggedExcludedModelInfo(
+          name: 'BRIA RMBG-1.4 & RMBG-2.0',
+          upstreamLicense: 'Non-Commercial',
+          reason: 'Commercial restriction; excluded.',
+        ),
+      ],
+    );
   }
 
   @override
-  Future<bool> deleteAiModel(String modelId) async => false;
+  Future<AiModelsCatalogModel> getAiCatalog() async => _buildFakeCatalog();
+
+  @override
+  Stream<AiModelsCatalogModel> subscribeAiCatalog() => _aiEvents.stream;
+
+  @override
+  Future<void> startAiModelDownload(String modelId) async {
+    mockAiModels = mockAiModels.map((m) {
+      if (m.id != modelId) return m;
+      return AiModelStatusModel(
+        id: m.id,
+        displayName: m.displayName,
+        task: m.task,
+        defaultForTask: m.defaultForTask,
+        language: m.language,
+        scale: m.scale,
+        spdxLicense: m.spdxLicense,
+        sourceUrl: m.sourceUrl,
+        attribution: m.attribution,
+        description: m.description,
+        sizeBytes: m.sizeBytes,
+        sha256: m.sha256,
+        files: m.files,
+        state: ModelInstallStateId.ready,
+        installed: true,
+        downloadedBytes: m.sizeBytes,
+        progress: 1.0,
+      );
+    }).toList();
+    _aiEvents.add(_buildFakeCatalog());
+  }
+
+  @override
+  bool cancelAiModelDownload(String modelId) => true;
+
+  @override
+  Future<String> setAiModelsDir(String? customDir) async {
+    _isCustomDir = customDir != null && customDir.isNotEmpty;
+    _modelsDir = _isCustomDir ? customDir! : '/tmp/tool_center_ai_models';
+    _aiEvents.add(_buildFakeCatalog());
+    return _modelsDir;
+  }
+
+  @override
+  void setAiDevicePreference(String preference) {
+    _devicePref = preference;
+    _aiEvents.add(_buildFakeCatalog());
+  }
+
+  @override
+  Future<String> importAiModel({
+    required String modelId,
+    required String sourcePath,
+  }) async {
+    await startAiModelDownload(modelId);
+    return '$_modelsDir/$modelId';
+  }
+
+  @override
+  Future<bool> deleteAiModel(String modelId) async {
+    mockAiModels = mockAiModels.map((m) {
+      if (m.id != modelId) return m;
+      return AiModelStatusModel(
+        id: m.id,
+        displayName: m.displayName,
+        task: m.task,
+        defaultForTask: m.defaultForTask,
+        language: m.language,
+        scale: m.scale,
+        spdxLicense: m.spdxLicense,
+        sourceUrl: m.sourceUrl,
+        attribution: m.attribution,
+        description: m.description,
+        sizeBytes: m.sizeBytes,
+        sha256: m.sha256,
+        files: m.files,
+        state: ModelInstallStateId.notInstalled,
+        installed: false,
+      );
+    }).toList();
+    _aiEvents.add(_buildFakeCatalog());
+    return true;
+  }
 }
 
 /// Reveals a file or folder in the user's native OS file manager without blocking.

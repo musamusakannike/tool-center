@@ -1,0 +1,1017 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:path/path.dart' as p;
+
+import '../../services/core_service.dart';
+import '../theme/app_theme.dart';
+
+/// Parses `reportJson` from AI tools (`ai.remove_bg`, `ai.upscale`, `ai.ocr`) and renders rich
+/// visual result controls (Before/After split slider with checkerboard transparency, or OCR viewer).
+class AiJobResultEnhancement extends StatelessWidget {
+  final String rawReportJson;
+  final ToolCenterBackend backend;
+
+  const AiJobResultEnhancement({
+    super.key,
+    required this.rawReportJson,
+    required this.backend,
+  });
+
+  static bool isAiVisualReport(String? rawJson) {
+    if (rawJson == null || rawJson.isEmpty) return false;
+    try {
+      final map = jsonDecode(rawJson);
+      if (map is Map<String, dynamic>) {
+        final kind = map['tool_kind']?.toString() ?? '';
+        return kind == 'ai.remove_bg' ||
+            kind == 'ai.upscale' ||
+            kind == 'ai.ocr';
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Map<String, dynamic>? parsed;
+    try {
+      final decoded = jsonDecode(rawReportJson);
+      if (decoded is Map<String, dynamic>) {
+        parsed = decoded;
+      }
+    } catch (_) {}
+
+    if (parsed == null) {
+      return const SizedBox.shrink();
+    }
+
+    final toolKind = parsed['tool_kind']?.toString() ?? '';
+    if (toolKind == 'ai.remove_bg' || toolKind == 'ai.upscale') {
+      return BeforeAfterComparisonCard(report: parsed, backend: backend);
+    }
+    if (toolKind == 'ai.ocr') {
+      return OcrInteractiveResultCard(report: parsed, backend: backend);
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+/// Interactive Before / After comparison slider with checkerboard transparency canvas and batch switcher.
+class BeforeAfterComparisonCard extends StatefulWidget {
+  final Map<String, dynamic> report;
+  final ToolCenterBackend backend;
+
+  const BeforeAfterComparisonCard({
+    super.key,
+    required this.report,
+    required this.backend,
+  });
+
+  @override
+  State<BeforeAfterComparisonCard> createState() =>
+      _BeforeAfterComparisonCardState();
+}
+
+class _BeforeAfterComparisonCardState extends State<BeforeAfterComparisonCard> {
+  int _selectedIndex = 0;
+  double _splitFraction = 0.5;
+  Uint8List? _beforeBytes;
+  Uint8List? _afterBytes;
+  bool _loading = false;
+  String? _loadError;
+
+  List<Map<String, dynamic>> get _items {
+    final raw = widget.report['items'];
+    if (raw is List) {
+      return raw.whereType<Map>().map(Map<String, dynamic>.from).toList();
+    }
+    return const [];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSelectedPair();
+  }
+
+  @override
+  void didUpdateWidget(covariant BeforeAfterComparisonCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.report != widget.report) {
+      _selectedIndex = 0;
+      _loadSelectedPair();
+    }
+  }
+
+  Future<Uint8List> _readPreviewOrDisk(String path) async {
+    try {
+      final decoded = await widget.backend.renderDecodedImagePreview(
+        path,
+        maxDimension: 1600,
+      );
+      if (decoded.isNotEmpty) return decoded;
+    } catch (_) {}
+    final f = File(path);
+    if (await f.exists()) {
+      return f.readAsBytes();
+    }
+    throw StateError('Image file unavailable: $path');
+  }
+
+  Future<void> _loadSelectedPair() async {
+    final items = _items;
+    if (items.isEmpty) return;
+    final idx = _selectedIndex.clamp(0, items.length - 1);
+    final item = items[idx];
+    final inPath = item['input_path']?.toString() ?? '';
+    final outPath = item['output_path']?.toString() ?? '';
+    if (inPath.isEmpty || outPath.isEmpty) return;
+
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        _readPreviewOrDisk(inPath),
+        _readPreviewOrDisk(outPath),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _beforeBytes = results[0];
+        _afterBytes = results[1];
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _items;
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final safeIdx = _selectedIndex.clamp(0, items.length - 1);
+    final current = items[safeIdx];
+    final provider =
+        (widget.report['active_provider']?.toString() ?? 'cpu').toUpperCase();
+    final modelName = widget.report['model_name']?.toString() ?? 'AI Model';
+    final outW = current['output_width'] ?? current['width'];
+    final outH = current['output_height'] ?? current['height'];
+    final inW = current['input_width'];
+    final inH = current['input_height'];
+
+    String dimText = '';
+    if (inW != null && inH != null && outW != null && outH != null) {
+      dimText = '$inW×$inH → $outW×$outH px';
+    } else if (outW != null && outH != null) {
+      dimText = '$outW×$outH px';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.compare_rounded, size: 18, color: scheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              'Before / After Comparison',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Spacer(),
+            if (dimText.isNotEmpty) ...[
+              Text(
+                dimText,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: scheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$modelName • $provider',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSecondaryContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (items.length > 1) ...[
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (int i = 0; i < items.length; i++) ...[
+                  ChoiceChip(
+                    label: Text(
+                      p.basename(items[i]['output_path']?.toString() ?? '#${i + 1}'),
+                    ),
+                    selected: i == safeIdx,
+                    onSelected: (_) {
+                      setState(() => _selectedIndex = i);
+                      _loadSelectedPair();
+                    },
+                  ),
+                  if (i < items.length - 1) const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          child: Container(
+            height: 360,
+            decoration: BoxDecoration(
+              border: Border.all(color: scheme.outlineVariant),
+              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            ),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _loadError != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            _loadError!,
+                            style: TextStyle(color: scheme.error),
+                          ),
+                        ),
+                      )
+                    : (_beforeBytes != null && _afterBytes != null)
+                        ? LayoutBuilder(
+                            builder: (context, constraints) {
+                              final maxW = constraints.maxWidth;
+                              final splitX = maxW * _splitFraction;
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onHorizontalDragUpdate: (details) {
+                                  setState(() {
+                                    _splitFraction = (details.localPosition.dx /
+                                            maxW)
+                                        .clamp(0.0, 1.0);
+                                  });
+                                },
+                                onTapDown: (details) {
+                                  setState(() {
+                                    _splitFraction = (details.localPosition.dx /
+                                            maxW)
+                                        .clamp(0.0, 1.0);
+                                  });
+                                },
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    // Checkerboard transparency backdrop
+                                    CheckerboardCanvas(
+                                      isDark:
+                                          theme.brightness == Brightness.dark,
+                                    ),
+                                    // Full "AFTER" layer
+                                    Image.memory(
+                                      _afterBytes!,
+                                      fit: BoxFit.contain,
+                                      gaplessPlayback: true,
+                                    ),
+                                    // Clipped "BEFORE" layer on the left side
+                                    ClipRect(
+                                      clipper: _LeftSplitClipper(
+                                        fraction: _splitFraction,
+                                      ),
+                                      child: Container(
+                                        color: scheme.surfaceContainerLowest,
+                                        child: Image.memory(
+                                          _beforeBytes!,
+                                          fit: BoxFit.contain,
+                                          gaplessPlayback: true,
+                                        ),
+                                      ),
+                                    ),
+                                    // Vertical split line + drag thumb
+                                    Positioned(
+                                      left: (splitX - 1).clamp(0.0, maxW - 2),
+                                      top: 0,
+                                      bottom: 0,
+                                      child: Container(
+                                        width: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: (splitX - 18).clamp(0.0, maxW - 36),
+                                      top: 162,
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: scheme.primary,
+                                          shape: BoxShape.circle,
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              blurRadius: 6,
+                                              color: Colors.black38,
+                                            ),
+                                          ],
+                                        ),
+                                        child: SizedBox(
+                                          width: 36,
+                                          height: 36,
+                                          child: Icon(
+                                            Icons.swap_horiz_rounded,
+                                            size: 20,
+                                            color: scheme.onPrimary,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    // BEFORE / AFTER corner badges
+                                    Positioned(
+                                      left: 10,
+                                      top: 10,
+                                      child: _CornerBadge(label: 'BEFORE'),
+                                    ),
+                                    Positioned(
+                                      right: 10,
+                                      top: 10,
+                                      child: _CornerBadge(label: 'AFTER'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          )
+                        : const SizedBox.shrink(),
+          ),
+        ),
+        Row(
+          children: [
+            Text('Before', style: theme.textTheme.labelSmall),
+            Expanded(
+              child: Slider(
+                value: _splitFraction,
+                onChanged: (v) => setState(() => _splitFraction = v),
+              ),
+            ),
+            Text('After', style: theme.textTheme.labelSmall),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _CornerBadge extends StatelessWidget {
+  final String label;
+
+  const _CornerBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
+
+class _LeftSplitClipper extends CustomClipper<Rect> {
+  final double fraction;
+
+  const _LeftSplitClipper({required this.fraction});
+
+  @override
+  Rect getClip(Size size) {
+    return Rect.fromLTWH(0, 0, size.width * fraction.clamp(0.0, 1.0), size.height);
+  }
+
+  @override
+  bool shouldReclip(covariant _LeftSplitClipper oldClipper) {
+    return oldClipper.fraction != fraction;
+  }
+}
+
+/// Crisp transparency checkerboard canvas for previewing RGBA cutouts.
+class CheckerboardCanvas extends StatelessWidget {
+  final bool isDark;
+  final double cellSize;
+
+  const CheckerboardCanvas({
+    super.key,
+    required this.isDark,
+    this.cellSize = 14.0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _CheckerboardPainter(isDark: isDark, cellSize: cellSize),
+    );
+  }
+}
+
+class _CheckerboardPainter extends CustomPainter {
+  final bool isDark;
+  final double cellSize;
+
+  const _CheckerboardPainter({required this.isDark, required this.cellSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final baseColor =
+        isDark ? const Color(0xFF1E222A) : const Color(0xFFF3F4F6);
+    final altColor =
+        isDark ? const Color(0xFF2A303C) : const Color(0xFFE2E5EC);
+
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = baseColor,
+    );
+
+    final altPaint = Paint()..color = altColor;
+    final cols = (size.width / cellSize).ceil();
+    final rows = (size.height / cellSize).ceil();
+
+    for (int r = 0; r < rows; r++) {
+      for (int c = (r % 2 == 0 ? 1 : 0); c < cols; c += 2) {
+        final left = c * cellSize;
+        final top = r * cellSize;
+        final w = (left + cellSize <= size.width) ? cellSize : size.width - left;
+        final h = (top + cellSize <= size.height) ? cellSize : size.height - top;
+        canvas.drawRect(Rect.fromLTWH(left, top, w, h), altPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CheckerboardPainter oldDelegate) {
+    return oldDelegate.isDark != isDark || oldDelegate.cellSize != cellSize;
+  }
+}
+
+/// Pre-run output resolution preview & large-output warning banner for `ai.upscale`.
+class UpscalePreRunBanner extends StatefulWidget {
+  final List<String> selectedPaths;
+  final int scaleFactor;
+  final ToolCenterBackend backend;
+
+  const UpscalePreRunBanner({
+    super.key,
+    required this.selectedPaths,
+    required this.scaleFactor,
+    required this.backend,
+  });
+
+  @override
+  State<UpscalePreRunBanner> createState() => _UpscalePreRunBannerState();
+}
+
+class _UpscalePreRunBannerState extends State<UpscalePreRunBanner> {
+  static final RegExp _dimRegex = RegExp(r'(\d+)\s*[×xX]\s*(\d+)');
+  List<({String name, int w, int h})> _dims = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _inspectDimensions();
+  }
+
+  @override
+  void didUpdateWidget(covariant UpscalePreRunBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedPaths.join('|') != widget.selectedPaths.join('|')) {
+      _inspectDimensions();
+    }
+  }
+
+  Future<void> _inspectDimensions() async {
+    final next = <({String name, int w, int h})>[];
+    for (final path in widget.selectedPaths.take(8)) {
+      try {
+        final info = await widget.backend.inspectFile(path);
+        for (final meta in info.metadata) {
+          if (meta.label == 'Dimensions') {
+            final match = _dimRegex.firstMatch(meta.value);
+            if (match != null) {
+              final w = int.tryParse(match.group(1)!) ?? 0;
+              final h = int.tryParse(match.group(2)!) ?? 0;
+              if (w > 0 && h > 0) {
+                next.add((name: p.basename(path), w: w, h: h));
+              }
+            }
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _dims = next;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_dims.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final s = widget.scaleFactor.clamp(2, 4);
+
+    int maxOutPixels = 0;
+    for (final d in _dims) {
+      final px = (d.w * s) * (d.h * s);
+      if (px > maxOutPixels) maxOutPixels = px;
+    }
+
+    final isVeryLarge = maxOutPixels >= 25000000;
+    final exceedsLimit = maxOutPixels > 140000000;
+    final first = _dims.first;
+    final outW = first.w * s;
+    final outH = first.h * s;
+    final mp = (outW * outH) / 1000000.0;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: exceedsLimit
+            ? scheme.errorContainer
+            : isVeryLarge
+                ? Colors.amber.withValues(alpha: 0.14)
+                : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(
+          color: exceedsLimit
+              ? scheme.error
+              : isVeryLarge
+                  ? Colors.amber.shade700
+                  : scheme.outlineVariant,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isVeryLarge
+                    ? Icons.warning_amber_rounded
+                    : Icons.aspect_ratio_rounded,
+                size: 18,
+                color: exceedsLimit
+                    ? scheme.onErrorContainer
+                    : isVeryLarge
+                        ? Colors.amber.shade800
+                        : scheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _dims.length == 1
+                      ? 'Output Size: ${first.w}×${first.h} px → $outW×$outH px ($s× • ${mp.toStringAsFixed(1)} MP)'
+                      : 'Batch Output (${_dims.length} files): e.g. ${first.w}×${first.h} → $outW×$outH px ($s×)',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: exceedsLimit ? scheme.onErrorContainer : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (exceedsLimit) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Output exceeds 140 MP safety ceiling. Switch to 2× or resize the input image first.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onErrorContainer,
+              ),
+            ),
+          ] else if (isVeryLarge) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Large output warning (${(maxOutPixels / 1000000.0).toStringAsFixed(1)} MP): processing will use tiled inference to keep RAM bounded, and saving PNG may take several seconds.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Interactive OCR viewer displaying highlighted text bounding boxes over each page,
+/// one-click region copying, "Copy all text", and multi-page switching.
+class OcrInteractiveResultCard extends StatefulWidget {
+  final Map<String, dynamic> report;
+  final ToolCenterBackend backend;
+
+  const OcrInteractiveResultCard({
+    super.key,
+    required this.report,
+    required this.backend,
+  });
+
+  @override
+  State<OcrInteractiveResultCard> createState() =>
+      _OcrInteractiveResultCardState();
+}
+
+class _OcrInteractiveResultCardState extends State<OcrInteractiveResultCard> {
+  int _pageCursor = 0;
+  int? _selectedRegionIdx;
+  Uint8List? _pageImageBytes;
+  bool _loadingPage = false;
+
+  List<Map<String, dynamic>> get _pages {
+    final raw = widget.report['pages'];
+    if (raw is List) {
+      return raw.whereType<Map>().map(Map<String, dynamic>.from).toList();
+    }
+    return const [];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentPageImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant OcrInteractiveResultCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.report != widget.report) {
+      _pageCursor = 0;
+      _selectedRegionIdx = null;
+      _loadCurrentPageImage();
+    }
+  }
+
+  Future<void> _loadCurrentPageImage() async {
+    final pages = _pages;
+    if (pages.isEmpty) return;
+    final idx = _pageCursor.clamp(0, pages.length - 1);
+    final page = pages[idx];
+    final srcPath = page['source_path']?.toString() ?? '';
+    final isPdf = page['is_pdf'] as bool? ?? false;
+    final pageIndex = (page['page_index'] as num?)?.toInt() ?? 0;
+    if (srcPath.isEmpty) return;
+
+    setState(() {
+      _loadingPage = true;
+    });
+
+    try {
+      Uint8List bytes;
+      if (isPdf) {
+        bytes = await widget.backend.renderPdfPagePreview(
+          srcPath,
+          pageIndex: pageIndex,
+          targetWidth: 1400,
+        );
+      } else {
+        bytes = await widget.backend.renderDecodedImagePreview(
+          srcPath,
+          maxDimension: 1400,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _pageImageBytes = bytes;
+        _loadingPage = false;
+      });
+    } catch (_) {
+      try {
+        final f = File(srcPath);
+        if (!isPdf && await f.exists()) {
+          final raw = await f.readAsBytes();
+          if (!mounted) return;
+          setState(() {
+            _pageImageBytes = raw;
+            _loadingPage = false;
+          });
+          return;
+        }
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _pageImageBytes = null;
+        _loadingPage = false;
+      });
+    }
+  }
+
+  Future<void> _copyText(String text, String toastLabel) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(toastLabel),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = _pages;
+    if (pages.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final safeIdx = _pageCursor.clamp(0, pages.length - 1);
+    final page = pages[safeIdx];
+    final fullAllText = widget.report['full_text']?.toString() ?? '';
+    final pageFullText = page['full_text']?.toString() ?? '';
+    final provider =
+        (widget.report['active_provider']?.toString() ?? 'cpu').toUpperCase();
+    final modelName = widget.report['model_name']?.toString() ?? 'PaddleOCR';
+
+    final pageW = ((page['page_width'] as num?)?.toDouble() ?? 1000.0)
+        .clamp(1.0, 20000.0);
+    final pageH = ((page['page_height'] as num?)?.toDouble() ?? 1000.0)
+        .clamp(1.0, 20000.0);
+
+    final rawRegions = page['regions'];
+    final regions = rawRegions is List
+        ? rawRegions.whereType<Map>().map(Map<String, dynamic>.from).toList()
+        : const <Map<String, dynamic>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header + Copy All Text button
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.document_scanner_outlined,
+                  size: 18,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Detected Text Regions (${regions.length})',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$modelName • $provider',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSecondaryContainer,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            FilledButton.tonalIcon(
+              onPressed: fullAllText.trim().isEmpty
+                  ? null
+                  : () => _copyText(
+                        fullAllText,
+                        'Copied all recognized text to clipboard.',
+                      ),
+              icon: const Icon(Icons.copy_all_rounded, size: 18),
+              label: const Text('Copy All Text'),
+            ),
+          ],
+        ),
+
+        // Multi-page navigator
+        if (pages.length > 1) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous page',
+                onPressed: safeIdx > 0
+                    ? () {
+                        setState(() {
+                          _pageCursor = safeIdx - 1;
+                          _selectedRegionIdx = null;
+                        });
+                        _loadCurrentPageImage();
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              Text(
+                'Page ${safeIdx + 1} of ${pages.length} • ${p.basename(page['source_path']?.toString() ?? '')}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Next page',
+                onPressed: safeIdx < pages.length - 1
+                    ? () {
+                        setState(() {
+                          _pageCursor = safeIdx + 1;
+                          _selectedRegionIdx = null;
+                        });
+                        _loadCurrentPageImage();
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ],
+          ),
+        ],
+
+        const SizedBox(height: 10),
+        Text(
+          'Click any highlighted region on the page to copy its text:',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Highlighted Bounding-Box Page Viewer
+        Container(
+          height: 380,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: _loadingPage
+              ? const Center(child: CircularProgressIndicator())
+              : _pageImageBytes == null
+                  ? Center(
+                      child: Text(
+                        'Page preview unavailable — see extracted text below.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final cw = constraints.maxWidth;
+                        final ch = constraints.maxHeight;
+                        final fitScale =
+                            (cw / pageW < ch / pageH) ? cw / pageW : ch / pageH;
+                        final drawW = pageW * fitScale;
+                        final drawH = pageH * fitScale;
+                        final offX = (cw - drawW) * 0.5;
+                        final offY = (ch - drawH) * 0.5;
+
+                        return Stack(
+                          children: [
+                            Positioned(
+                              left: offX,
+                              top: offY,
+                              width: drawW,
+                              height: drawH,
+                              child: Image.memory(
+                                _pageImageBytes!,
+                                fit: BoxFit.fill,
+                                gaplessPlayback: true,
+                              ),
+                            ),
+                            for (int r = 0; r < regions.length; r++)
+                              _buildRegionOverlay(
+                                context: context,
+                                region: regions[r],
+                                index: r,
+                                isSelected: _selectedRegionIdx == r,
+                                offX: offX,
+                                offY: offY,
+                                drawW: drawW,
+                                drawH: drawH,
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+        ),
+
+        // Selectable Text Box
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          ),
+          child: SelectableText(
+            pageFullText.isEmpty ? '(No text detected on this page)' : pageFullText,
+            style: theme.textTheme.bodyMedium?.copyWith(height: 1.45),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegionOverlay({
+    required BuildContext context,
+    required Map<String, dynamic> region,
+    required int index,
+    required bool isSelected,
+    required double offX,
+    required double offY,
+    required double drawW,
+    required double drawH,
+  }) {
+    final norm = region['bbox_norm'];
+    if (norm is! List || norm.length < 4) return const SizedBox.shrink();
+    final x0 = (norm[0] as num).toDouble().clamp(0.0, 1.0);
+    final y0 = (norm[1] as num).toDouble().clamp(0.0, 1.0);
+    final x1 = (norm[2] as num).toDouble().clamp(0.0, 1.0);
+    final y1 = (norm[3] as num).toDouble().clamp(0.0, 1.0);
+    final text = region['text']?.toString() ?? '';
+
+    final left = offX + x0 * drawW;
+    final top = offY + y0 * drawH;
+    final width = ((x1 - x0) * drawW).clamp(6.0, drawW);
+    final height = ((y1 - y0) * drawH).clamp(6.0, drawH);
+
+    final scheme = Theme.of(context).colorScheme;
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      height: height,
+      child: Tooltip(
+        message: 'Click to copy: "$text"',
+        child: Material(
+          color: isSelected
+              ? scheme.primary.withValues(alpha: 0.30)
+              : scheme.primary.withValues(alpha: 0.14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(3),
+            side: BorderSide(
+              color: isSelected
+                  ? scheme.primary
+                  : scheme.primary.withValues(alpha: 0.78),
+              width: isSelected ? 2.0 : 1.2,
+            ),
+          ),
+          child: InkWell(
+            onTap: () {
+              setState(() => _selectedRegionIdx = index);
+              _copyText(text, 'Copied: "$text"');
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
