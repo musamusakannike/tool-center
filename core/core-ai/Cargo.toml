@@ -8,7 +8,9 @@ repository.workspace = true
 [dependencies]
 core-image = { path = "../core-image" }
 core-jobs = { path = "../core-jobs" }
+core-pdf = { path = "../core-pdf" }
 image.workspace = true
+lopdf.workspace = true
 ort.workspace = true
 serde.workspace = true
 serde_json.workspace = true

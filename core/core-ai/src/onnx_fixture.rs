@@ -257,3 +257,126 @@ pub fn build_tiny_upscale_onnx(scale: u32) -> Vec<u8> {
         13,
     )
 }
+
+/// Builds a tiny valid `.onnx` DBNet text-detector fixture (`[N, 3, H, W]` -> `[N, 1, H, W]`)
+/// where dark ink pixels (`normalized < 0`) map to high probability (`> 0.85`) and white background
+/// pixels (`normalized > 0`) map to low probability (`< 0.15`).
+pub fn build_tiny_ocr_det_onnx() -> Vec<u8> {
+    let in_dims = [
+        DimSpec::Param("N"),
+        DimSpec::Fixed(3),
+        DimSpec::Param("H"),
+        DimSpec::Param("W"),
+    ];
+    let out_dims = [
+        DimSpec::Param("N"),
+        DimSpec::Fixed(1),
+        DimSpec::Param("H"),
+        DimSpec::Param("W"),
+    ];
+    let inp = encode_value_info_f32("x", &in_dims);
+    let out = encode_value_info_f32("prob", &out_dims);
+    let neg_init = encode_tensor_f32("neg_scale", &[1], &[-1.5]);
+    let mean_node = encode_node(
+        "ReduceMean",
+        "det_mean",
+        &["x"],
+        &["mean_c"],
+        &[
+            encode_attr_ints("axes", &[1]),
+            encode_attr_int("keepdims", 1),
+        ],
+    );
+    let mul_node = encode_node(
+        "Mul",
+        "det_invert",
+        &["mean_c", "neg_scale"],
+        &["logit"],
+        &[],
+    );
+    let sig_node = encode_node("Sigmoid", "det_sig", &["logit"], &["prob"], &[]);
+    wrap_model_proto(
+        "tiny_ocr_det",
+        &[mean_node, mul_node, sig_node],
+        &[neg_init],
+        &[inp],
+        &[out],
+        13,
+    )
+}
+
+/// Builds a tiny valid `.onnx` text angle classifier (`[N, 3, H, W]` -> `[1, 2]`) predicting `0°`.
+pub fn build_tiny_ocr_cls_onnx() -> Vec<u8> {
+    let in_dims = [
+        DimSpec::Param("N"),
+        DimSpec::Fixed(3),
+        DimSpec::Param("H"),
+        DimSpec::Param("W"),
+    ];
+    let out_dims = [DimSpec::Fixed(1), DimSpec::Fixed(2)];
+    let inp = encode_value_info_f32("x", &in_dims);
+    let out = encode_value_info_f32("cls_out", &out_dims);
+    let zero_init = encode_tensor_f32("zero", &[1], &[0.0]);
+    let bias_init = encode_tensor_f32("cls_probs", &[1, 2], &[0.98, 0.02]);
+    let mean_node = encode_node(
+        "ReduceMean",
+        "cls_global_mean",
+        &["x"],
+        &["scalar"],
+        &[encode_attr_int("keepdims", 0)],
+    );
+    let zero_node = encode_node("Mul", "cls_zero", &["scalar", "zero"], &["z"], &[]);
+    let add_node = encode_node("Add", "cls_add", &["z", "cls_probs"], &["cls_out"], &[]);
+    wrap_model_proto(
+        "tiny_ocr_cls",
+        &[mean_node, zero_node, add_node],
+        &[zero_init, bias_init],
+        &[inp],
+        &[out],
+        13,
+    )
+}
+
+/// Builds a tiny valid `.onnx` CTC recognizer (`[N, 3, H, W]` -> `[1, 6, 5]`) emitting token
+/// sequence `[1, 1, 0, 2, 4, 3]` -> `"OK 1"` when paired with `dict = ["O", "K", "1"]`
+/// (testing repeat-collapsing `1, 1 -> O`, blank `0`, and trailing space index `4 == dict.len() + 1`).
+pub fn build_tiny_ocr_rec_onnx() -> Vec<u8> {
+    let in_dims = [
+        DimSpec::Param("N"),
+        DimSpec::Fixed(3),
+        DimSpec::Param("H"),
+        DimSpec::Param("W"),
+    ];
+    let out_dims = [DimSpec::Fixed(1), DimSpec::Fixed(6), DimSpec::Fixed(5)];
+    let inp = encode_value_info_f32("x", &in_dims);
+    let out = encode_value_info_f32("ctc_probs", &out_dims);
+    let zero_init = encode_tensor_f32("zero", &[1], &[0.0]);
+    // 6 timesteps × 5 classes (0=blank, 1='O', 2='K', 3='1', 4=' ')
+    #[rustfmt::skip]
+    let ctc_table: [f32; 30] = [
+        0.01, 0.96, 0.01, 0.01, 0.01, // t=0 -> 1 ('O')
+        0.01, 0.95, 0.02, 0.01, 0.01, // t=1 -> 1 ('O', collapsed!)
+        0.96, 0.01, 0.01, 0.01, 0.01, // t=2 -> 0 (blank)
+        0.01, 0.01, 0.96, 0.01, 0.01, // t=3 -> 2 ('K')
+        0.01, 0.01, 0.01, 0.01, 0.96, // t=4 -> 4 (' ' space)
+        0.01, 0.01, 0.01, 0.96, 0.01, // t=5 -> 3 ('1')
+    ];
+    let probs_init = encode_tensor_f32("probs_const", &[1, 6, 5], &ctc_table);
+    let mean_node = encode_node(
+        "ReduceMean",
+        "rec_global_mean",
+        &["x"],
+        &["scalar"],
+        &[encode_attr_int("keepdims", 0)],
+    );
+    let zero_node = encode_node("Mul", "rec_zero", &["scalar", "zero"], &["z"], &[]);
+    let add_node = encode_node("Add", "rec_add", &["z", "probs_const"], &["ctc_probs"], &[]);
+    wrap_model_proto(
+        "tiny_ocr_rec",
+        &[mean_node, zero_node, add_node],
+        &[zero_init, probs_init],
+        &[inp],
+        &[out],
+        13,
+    )
+}

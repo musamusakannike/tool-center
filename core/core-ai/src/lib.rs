@@ -4,6 +4,7 @@
 pub mod bg_remove;
 pub mod downloader;
 pub mod manifest;
+pub mod ocr;
 pub mod onnx_fixture;
 pub mod runtime;
 pub mod upscale;
@@ -19,14 +20,23 @@ pub use manifest::{
     FlaggedNonCommercialModel, ModelFileEntry, ModelInstallState, ModelsManifest,
     EMBEDDED_MODELS_JSON,
 };
+pub use ocr::{AiOcrTool, OcrPageReport, OcrRegionItem};
 pub use runtime::{
     ensure_ort_environment, locate_onnxruntime_dylib, query_available_providers,
     ActiveProviderInfo, OrtSessionHandle, SessionPool,
 };
 pub use upscale::{select_auto_tile_size, AiUpscaleTool, LANCZOS_FALLBACK_ID};
 
-use core_jobs::{CancelHandle, ToolError};
+use core_jobs::{CancelHandle, ToolError, ToolRegistry};
 use std::path::Path;
+use std::sync::Arc;
+
+/// Registers all v2 AI tools (`ai.ocr`, `ai.remove_bg`, `ai.upscale`) into the shared `ToolRegistry`.
+pub fn register_ai_tools(registry: &ToolRegistry, hub: &Arc<AiRuntimeHub>) {
+    registry.register(AiOcrTool::new(Arc::clone(hub)));
+    registry.register(AiRemoveBgTool::new(Arc::clone(hub)));
+    registry.register(AiUpscaleTool::new(Arc::clone(hub)));
+}
 
 /// Trait boundary for an ONNX Runtime (`ort`) execution session.
 pub trait OnnxInferenceSession: Send + Sync {
@@ -643,5 +653,178 @@ mod tests {
             .unwrap()
             .to_rgba8();
         assert_eq!((x4_out.width(), x4_out.height()), (692, 476));
+    }
+
+    #[test]
+    fn ai_ocr_processes_image_and_multipage_pdf_into_txt_md_and_searchable_pdf() {
+        use core_jobs::{Tool, ToolContext, ToolOptions};
+        use image::{ImageBuffer, Rgba};
+        use serde_json::json;
+        use std::sync::Arc;
+
+        let dir = tempdir().unwrap();
+        let models_dir = dir.path().join("models");
+        let pack_staging = dir.path().join("ocr_pack_staging");
+        let work_dir = dir.path().join("work");
+        fs::create_dir_all(&pack_staging).unwrap();
+        fs::create_dir_all(&work_dir).unwrap();
+
+        let det_bytes = onnx_fixture::build_tiny_ocr_det_onnx();
+        let cls_bytes = onnx_fixture::build_tiny_ocr_cls_onnx();
+        let rec_bytes = onnx_fixture::build_tiny_ocr_rec_onnx();
+        let dict_bytes = b"O\nK\n1\n".to_vec();
+
+        fs::write(pack_staging.join("det.onnx"), &det_bytes).unwrap();
+        fs::write(pack_staging.join("cls.onnx"), &cls_bytes).unwrap();
+        fs::write(pack_staging.join("rec.onnx"), &rec_bytes).unwrap();
+        fs::write(pack_staging.join("en_dict.txt"), &dict_bytes).unwrap();
+
+        let total_size =
+            (det_bytes.len() + cls_bytes.len() + rec_bytes.len() + dict_bytes.len()) as u64;
+
+        let manifest = ModelsManifest {
+            schema_version: 1,
+            updated_at: "2026-11-27".into(),
+            models: vec![AiModelSpec {
+                id: "ocr.ppocr_v4_en".into(),
+                display_name: "PP-OCRv4 English Fixture".into(),
+                task: AiTask::Ocr,
+                url: "https://example.com/rec.onnx".into(),
+                size_bytes: total_size,
+                sha256: sha256_bytes(&rec_bytes),
+                license: "Apache-2.0".into(),
+                source_url: "https://github.com/PaddlePaddle/PaddleOCR".into(),
+                attribution: "PaddleOCR (Apache-2.0)".into(),
+                description: "OCR test fixture".into(),
+                default_for_task: true,
+                language: Some("en".into()),
+                scale: None,
+                files: vec![
+                    ModelFileEntry {
+                        role: "det".into(),
+                        filename: "det.onnx".into(),
+                        url: "https://example.com/det.onnx".into(),
+                        size_bytes: det_bytes.len() as u64,
+                        sha256: sha256_bytes(&det_bytes),
+                    },
+                    ModelFileEntry {
+                        role: "cls".into(),
+                        filename: "cls.onnx".into(),
+                        url: "https://example.com/cls.onnx".into(),
+                        size_bytes: cls_bytes.len() as u64,
+                        sha256: sha256_bytes(&cls_bytes),
+                    },
+                    ModelFileEntry {
+                        role: "rec".into(),
+                        filename: "rec.onnx".into(),
+                        url: "https://example.com/rec.onnx".into(),
+                        size_bytes: rec_bytes.len() as u64,
+                        sha256: sha256_bytes(&rec_bytes),
+                    },
+                    ModelFileEntry {
+                        role: "dict".into(),
+                        filename: "en_dict.txt".into(),
+                        url: "https://example.com/en_dict.txt".into(),
+                        size_bytes: dict_bytes.len() as u64,
+                        sha256: sha256_bytes(&dict_bytes),
+                    },
+                ],
+            }],
+        };
+
+        let hub = Arc::new(AiRuntimeHub::with_manifest(models_dir, manifest).unwrap());
+        hub.manager()
+            .unwrap()
+            .import_offline_model("ocr.ppocr_v4_en", &pack_staging)
+            .unwrap();
+
+        let tool = AiOcrTool::new(Arc::clone(&hub));
+
+        // 1. Create a scanned image with 2 dark horizontal text bars on a white page
+        let scan_img_path = work_dir.join("scan.png");
+        let mut page = ImageBuffer::from_pixel(320, 224, Rgba([250u8, 250, 250, 255]));
+        for y in 40..64 {
+            for x in 36..240 {
+                page.put_pixel(x, y, Rgba([12, 12, 12, 255]));
+            }
+        }
+        for y in 120..144 {
+            for x in 36..210 {
+                page.put_pixel(x, y, Rgba([15, 15, 15, 255]));
+            }
+        }
+        page.save(&scan_img_path).unwrap();
+
+        let make_ctx = |inputs: Vec<std::path::PathBuf>, opts: ToolOptions| {
+            ToolContext::new(
+                "test-ocr",
+                inputs,
+                opts,
+                None,
+                CancelHandle::new(),
+                Arc::new(|_, _| {}),
+            )
+        };
+
+        // Test .txt & .md export + preprocessing toggles (contrast + deskew)
+        let mut txt_opts = ToolOptions::new();
+        txt_opts.insert("model_id", json!("ocr.ppocr_v4_en"));
+        txt_opts.insert("output_format", json!("txt"));
+        txt_opts.insert("enhance_contrast", json!(true));
+        txt_opts.insert("deskew", json!(true));
+        let txt_res = tool
+            .run(&make_ctx(vec![scan_img_path.clone()], txt_opts))
+            .unwrap();
+        let txt_written = fs::read_to_string(&txt_res.outputs[0].path).unwrap();
+        assert!(
+            txt_written.contains("OK 1"),
+            "Expected CTC decoded 'OK 1', got: {txt_written}"
+        );
+        assert_eq!(txt_written.lines().count(), 2, "Expected 2 detected lines");
+
+        let mut md_opts = ToolOptions::new();
+        md_opts.insert("model_id", json!("ocr.ppocr_v4_en"));
+        md_opts.insert("output_format", json!("md"));
+        let md_res = tool
+            .run(&make_ctx(vec![scan_img_path.clone()], md_opts))
+            .unwrap();
+        let md_written = fs::read_to_string(&md_res.outputs[0].path).unwrap();
+        assert!(md_written.starts_with("# OCR — scan.png"));
+        assert!(md_written.contains("OK 1"));
+
+        // 2. Multi-page PDF input streamed via `pdfium-render` -> Searchable PDF output via `lopdf`!
+        let src_pdf_path = work_dir.join("two_page_scan.pdf");
+        let pdf_bytes = core_pdf::create_minimal_pdf_bytes(&["HEADER LINE ONE", "SECOND PAGE DOC"]);
+        fs::write(&src_pdf_path, pdf_bytes).unwrap();
+
+        let mut spdf_opts = ToolOptions::new();
+        spdf_opts.insert("model_id", json!("ocr.ppocr_v4_en"));
+        spdf_opts.insert("output_format", json!("searchable_pdf"));
+        let spdf_res = tool
+            .run(&make_ctx(vec![src_pdf_path.clone()], spdf_opts))
+            .unwrap();
+        assert_eq!(spdf_res.outputs.len(), 1);
+        let spdf_path = Path::new(&spdf_res.outputs[0].path);
+        assert!(spdf_path.exists());
+
+        // Inspect resulting Searchable PDF with `lopdf` to verify 2 pages, embedded Image XObject, and `3 Tr` selectable text!
+        let out_doc = lopdf::Document::load(spdf_path).unwrap();
+        assert_eq!(out_doc.get_pages().len(), 2);
+        let extracted_p1 = out_doc.extract_text(&[1]).unwrap();
+        assert!(
+            extracted_p1.contains("OK 1"),
+            "Searchable PDF page 1 text layer must contain recognized OCR text, got: '{extracted_p1}'"
+        );
+        let has_image_xobject = out_doc.objects.values().any(|obj| {
+            obj.as_stream()
+                .ok()
+                .and_then(|s| s.dict.get(b"Subtype").ok())
+                .and_then(|v| v.as_name().ok())
+                == Some(b"Image".as_slice())
+        });
+        assert!(
+            has_image_xobject,
+            "Searchable PDF must preserve full-page scan image XObject"
+        );
     }
 }

@@ -498,7 +498,9 @@ version = "0.1.0"
 dependencies = [
  "core-image",
  "core-jobs",
+ "core-pdf",
  "image",
+ "lopdf",
  "ort",
  "serde",
  "serde_json",

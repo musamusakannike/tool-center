@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as p;
 
@@ -51,6 +51,9 @@ class AiJobResultEnhancement extends StatelessWidget {
     final toolKind = parsed['tool_kind']?.toString() ?? '';
     if (toolKind == 'ai.remove_bg' || toolKind == 'ai.upscale') {
       return BeforeAfterComparisonCard(report: parsed, backend: backend);
+    }
+    if (toolKind == 'ai.ocr') {
+      return OcrInteractiveResultCard(report: parsed, backend: backend);
     }
 
     return const SizedBox.shrink();
@@ -627,6 +630,387 @@ class _UpscalePreRunBannerState extends State<UpscalePreRunBanner> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Interactive OCR viewer displaying highlighted text bounding boxes over each page,
+/// one-click region copying, "Copy all text", and multi-page switching.
+class OcrInteractiveResultCard extends StatefulWidget {
+  final Map<String, dynamic> report;
+  final ToolCenterBackend backend;
+
+  const OcrInteractiveResultCard({
+    super.key,
+    required this.report,
+    required this.backend,
+  });
+
+  @override
+  State<OcrInteractiveResultCard> createState() =>
+      _OcrInteractiveResultCardState();
+}
+
+class _OcrInteractiveResultCardState extends State<OcrInteractiveResultCard> {
+  int _pageCursor = 0;
+  int? _selectedRegionIdx;
+  Uint8List? _pageImageBytes;
+  bool _loadingPage = false;
+
+  List<Map<String, dynamic>> get _pages {
+    final raw = widget.report['pages'];
+    if (raw is List) {
+      return raw.whereType<Map>().map(Map<String, dynamic>.from).toList();
+    }
+    return const [];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentPageImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant OcrInteractiveResultCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.report != widget.report) {
+      _pageCursor = 0;
+      _selectedRegionIdx = null;
+      _loadCurrentPageImage();
+    }
+  }
+
+  Future<void> _loadCurrentPageImage() async {
+    final pages = _pages;
+    if (pages.isEmpty) return;
+    final idx = _pageCursor.clamp(0, pages.length - 1);
+    final page = pages[idx];
+    final srcPath = page['source_path']?.toString() ?? '';
+    final isPdf = page['is_pdf'] as bool? ?? false;
+    final pageIndex = (page['page_index'] as num?)?.toInt() ?? 0;
+    if (srcPath.isEmpty) return;
+
+    setState(() {
+      _loadingPage = true;
+    });
+
+    try {
+      Uint8List bytes;
+      if (isPdf) {
+        bytes = await widget.backend.renderPdfPagePreview(
+          srcPath,
+          pageIndex: pageIndex,
+          targetWidth: 1400,
+        );
+      } else {
+        bytes = await widget.backend.renderDecodedImagePreview(
+          srcPath,
+          maxDimension: 1400,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _pageImageBytes = bytes;
+        _loadingPage = false;
+      });
+    } catch (_) {
+      try {
+        final f = File(srcPath);
+        if (!isPdf && await f.exists()) {
+          final raw = await f.readAsBytes();
+          if (!mounted) return;
+          setState(() {
+            _pageImageBytes = raw;
+            _loadingPage = false;
+          });
+          return;
+        }
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _pageImageBytes = null;
+        _loadingPage = false;
+      });
+    }
+  }
+
+  Future<void> _copyText(String text, String toastLabel) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(toastLabel),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = _pages;
+    if (pages.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final safeIdx = _pageCursor.clamp(0, pages.length - 1);
+    final page = pages[safeIdx];
+    final fullAllText = widget.report['full_text']?.toString() ?? '';
+    final pageFullText = page['full_text']?.toString() ?? '';
+    final provider =
+        (widget.report['active_provider']?.toString() ?? 'cpu').toUpperCase();
+    final modelName = widget.report['model_name']?.toString() ?? 'PaddleOCR';
+
+    final pageW = ((page['page_width'] as num?)?.toDouble() ?? 1000.0)
+        .clamp(1.0, 20000.0);
+    final pageH = ((page['page_height'] as num?)?.toDouble() ?? 1000.0)
+        .clamp(1.0, 20000.0);
+
+    final rawRegions = page['regions'];
+    final regions = rawRegions is List
+        ? rawRegions.whereType<Map>().map(Map<String, dynamic>.from).toList()
+        : const <Map<String, dynamic>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header + Copy All Text button
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.document_scanner_outlined,
+                  size: 18,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Detected Text Regions (${regions.length})',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$modelName • $provider',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSecondaryContainer,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            FilledButton.tonalIcon(
+              onPressed: fullAllText.trim().isEmpty
+                  ? null
+                  : () => _copyText(
+                        fullAllText,
+                        'Copied all recognized text to clipboard.',
+                      ),
+              icon: const Icon(Icons.copy_all_rounded, size: 18),
+              label: const Text('Copy All Text'),
+            ),
+          ],
+        ),
+
+        // Multi-page navigator
+        if (pages.length > 1) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous page',
+                onPressed: safeIdx > 0
+                    ? () {
+                        setState(() {
+                          _pageCursor = safeIdx - 1;
+                          _selectedRegionIdx = null;
+                        });
+                        _loadCurrentPageImage();
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              Text(
+                'Page ${safeIdx + 1} of ${pages.length} • ${p.basename(page['source_path']?.toString() ?? '')}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Next page',
+                onPressed: safeIdx < pages.length - 1
+                    ? () {
+                        setState(() {
+                          _pageCursor = safeIdx + 1;
+                          _selectedRegionIdx = null;
+                        });
+                        _loadCurrentPageImage();
+                      }
+                    : null,
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ],
+          ),
+        ],
+
+        const SizedBox(height: 10),
+        Text(
+          'Click any highlighted region on the page to copy its text:',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Highlighted Bounding-Box Page Viewer
+        Container(
+          height: 380,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: _loadingPage
+              ? const Center(child: CircularProgressIndicator())
+              : _pageImageBytes == null
+                  ? Center(
+                      child: Text(
+                        'Page preview unavailable — see extracted text below.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final cw = constraints.maxWidth;
+                        final ch = constraints.maxHeight;
+                        final fitScale =
+                            (cw / pageW < ch / pageH) ? cw / pageW : ch / pageH;
+                        final drawW = pageW * fitScale;
+                        final drawH = pageH * fitScale;
+                        final offX = (cw - drawW) * 0.5;
+                        final offY = (ch - drawH) * 0.5;
+
+                        return Stack(
+                          children: [
+                            Positioned(
+                              left: offX,
+                              top: offY,
+                              width: drawW,
+                              height: drawH,
+                              child: Image.memory(
+                                _pageImageBytes!,
+                                fit: BoxFit.fill,
+                                gaplessPlayback: true,
+                              ),
+                            ),
+                            for (int r = 0; r < regions.length; r++)
+                              _buildRegionOverlay(
+                                context: context,
+                                region: regions[r],
+                                index: r,
+                                isSelected: _selectedRegionIdx == r,
+                                offX: offX,
+                                offY: offY,
+                                drawW: drawW,
+                                drawH: drawH,
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+        ),
+
+        // Selectable Text Box
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          ),
+          child: SelectableText(
+            pageFullText.isEmpty ? '(No text detected on this page)' : pageFullText,
+            style: theme.textTheme.bodyMedium?.copyWith(height: 1.45),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegionOverlay({
+    required BuildContext context,
+    required Map<String, dynamic> region,
+    required int index,
+    required bool isSelected,
+    required double offX,
+    required double offY,
+    required double drawW,
+    required double drawH,
+  }) {
+    final norm = region['bbox_norm'];
+    if (norm is! List || norm.length < 4) return const SizedBox.shrink();
+    final x0 = (norm[0] as num).toDouble().clamp(0.0, 1.0);
+    final y0 = (norm[1] as num).toDouble().clamp(0.0, 1.0);
+    final x1 = (norm[2] as num).toDouble().clamp(0.0, 1.0);
+    final y1 = (norm[3] as num).toDouble().clamp(0.0, 1.0);
+    final text = region['text']?.toString() ?? '';
+
+    final left = offX + x0 * drawW;
+    final top = offY + y0 * drawH;
+    final width = ((x1 - x0) * drawW).clamp(6.0, drawW);
+    final height = ((y1 - y0) * drawH).clamp(6.0, drawH);
+
+    final scheme = Theme.of(context).colorScheme;
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      height: height,
+      child: Tooltip(
+        message: 'Click to copy: "$text"',
+        child: Material(
+          color: isSelected
+              ? scheme.primary.withValues(alpha: 0.30)
+              : scheme.primary.withValues(alpha: 0.14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(3),
+            side: BorderSide(
+              color: isSelected
+                  ? scheme.primary
+                  : scheme.primary.withValues(alpha: 0.78),
+              width: isSelected ? 2.0 : 1.2,
+            ),
+          ),
+          child: InkWell(
+            onTap: () {
+              setState(() => _selectedRegionIdx = index);
+              _copyText(text, 'Copied: "$text"');
+            },
+          ),
+        ),
       ),
     );
   }
