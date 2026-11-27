@@ -136,10 +136,16 @@ elseif(EXISTS "${RUST_BRIDGE_DEBUG}")
   install(FILES "${RUST_BRIDGE_DEBUG}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 endif()
 
-# Bundle fetched PDFium & LGPL FFmpeg sidecar when present in vendor/
+# Bundle fetched PDFium, ONNX Runtime, & LGPL FFmpeg sidecar when present in vendor/
 set(VENDOR_LINUX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/linux-x64")
 if(EXISTS "${VENDOR_LINUX_DIR}/pdfium/lib/libpdfium.so")
   install(FILES "${VENDOR_LINUX_DIR}/pdfium/lib/libpdfium.so" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+if(EXISTS "${VENDOR_LINUX_DIR}/onnxruntime/lib/libonnxruntime.so")
+  install(FILES "${VENDOR_LINUX_DIR}/onnxruntime/lib/libonnxruntime.so" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+if(EXISTS "${VENDOR_LINUX_DIR}/onnxruntime/lib/libonnxruntime_providers_shared.so")
+  install(FILES "${VENDOR_LINUX_DIR}/onnxruntime/lib/libonnxruntime_providers_shared.so" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 endif()
 if(EXISTS "${VENDOR_LINUX_DIR}/ffmpeg")
   install(DIRECTORY "${VENDOR_LINUX_DIR}/ffmpeg" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" USE_SOURCE_PERMISSIONS COMPONENT Runtime)

@@ -26,6 +26,16 @@ pub fn engine() -> &'static EngineState {
                 .expect("Embedded models.json failed integrity/license validation"),
         );
 
+        let ai_reaper = Arc::clone(&ai);
+        runtime.spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                ai_reaper.evict_idle_sessions();
+            }
+        });
+
         let registry = build_default_registry();
         let concurrency = std::thread::available_parallelism()
             .map(|n| n.get().clamp(2, 8))

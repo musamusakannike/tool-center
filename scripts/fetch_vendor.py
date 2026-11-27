@@ -212,8 +212,76 @@ def fetch_ffmpeg(target: str, out_dir: Path) -> None:
     print(f"Extracted LGPL FFmpeg -> {ffmpeg_dir}")
 
 
+ONNXRUNTIME_ASSETS = {
+    "linux-x64": (
+        "https://files.pythonhosted.org/packages/ef/88/9cc25d2bafe6bc0d4d3c1db3ade98196d5b355c0b273e6a5dc09c5d5d0d5/onnxruntime-1.23.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "0f9b4ae77f8e3c9bee50c27bc1beede83f786fe1d52e99ac85aa8d65a01e9b77",
+    ),
+    "linux-arm64": (
+        "https://files.pythonhosted.org/packages/3c/35/4e40f2fba272a6698d62be2cd21ddc3675edfc1a4b9ddefcc4648f115315/onnxruntime-1.23.2-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+        "76ff670550dc23e58ea9bc53b5149b99a44e63b34b524f7b8547469aaa0dcb8c",
+    ),
+    "macos-arm64": (
+        "https://files.pythonhosted.org/packages/1b/9e/f748cd64161213adeef83d0cb16cb8ace1e62fa501033acdd9f9341fff57/onnxruntime-1.23.2-cp312-cp312-macosx_13_0_arm64.whl",
+        "b8f029a6b98d3cf5be564d52802bb50a8489ab73409fa9db0bf583eabb7c2321",
+    ),
+    "macos-x64": (
+        "https://files.pythonhosted.org/packages/91/9d/a81aafd899b900101988ead7fb14974c8a58695338ab6a0f3d6b0100f30b/onnxruntime-1.23.2-cp312-cp312-macosx_13_0_x86_64.whl",
+        "218295a8acae83905f6f1aed8cacb8e3eb3bd7513a13fe4ba3b2664a19fc4a6b",
+    ),
+    "windows-x64": (
+        "https://files.pythonhosted.org/packages/97/ce/516b4317155033a8f810a567a8556c2e2e40cd8a0521fd47f06168a9577f/onnxruntime_directml-1.23.0-cp312-cp312-win_amd64.whl",
+        "e621e3c0a251f83da338652508d9d68bfb8a1ad6123fc50fed4da9a05b4950bf",
+    ),
+    "windows-arm64": (
+        "https://files.pythonhosted.org/packages/aa/a9/7b06efd5802db881860d961a7cb4efacb058ed694c1c8f096c0c1499d017/onnxruntime-1.24.2-cp312-cp312-win_arm64.whl",
+        "8d770a934513f6e17937baf3438eaaec5983a23cdaedb81c9fc0dfcf26831c24",
+    ),
+}
+
+
+def fetch_onnxruntime(target: str, out_dir: Path) -> None:
+    url, sha = ONNXRUNTIME_ASSETS[target]
+    ort_dir = out_dir / "onnxruntime"
+    lib_dir = ort_dir / ("bin" if target.startswith("windows-") else "lib")
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "onnxruntime.whl"
+        download_verified(url, sha, archive)
+        with zipfile.ZipFile(archive, "r") as zf:
+            for member in zf.infolist():
+                name = member.filename
+                base = Path(name).name
+                if not base or "pybind11" in base or base.endswith((".py", ".pyd")):
+                    continue
+                if name in ("onnxruntime/LICENSE", "onnxruntime/ThirdPartyNotices.txt"):
+                    with zf.open(member) as src, (ort_dir / base).open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                elif name.startswith("onnxruntime/capi/"):
+                    if target.startswith("linux-") and base.startswith("libonnxruntime.so."):
+                        dest_main = lib_dir / "libonnxruntime.so"
+                        with zf.open(member) as src, dest_main.open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        make_executable(dest_main)
+                    elif target.startswith("macos-") and base.startswith("libonnxruntime.") and base.endswith(".dylib"):
+                        dest_main = lib_dir / "libonnxruntime.dylib"
+                        with zf.open(member) as src, dest_main.open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        make_executable(dest_main)
+                    elif base.endswith((".so", ".dylib", ".dll")):
+                        dest_aux = lib_dir / base
+                        with zf.open(member) as src, dest_aux.open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        make_executable(dest_aux)
+
+    print(f"Extracted ONNX Runtime (MIT) -> {ort_dir}")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Fetch pinned PDFium & LGPL FFmpeg binaries.")
+    parser = argparse.ArgumentParser(
+        description="Fetch pinned PDFium, LGPL FFmpeg, and MIT ONNX Runtime binaries."
+    )
     parser.add_argument(
         "--target",
         default=detect_host_target(),
@@ -236,7 +304,7 @@ def main() -> int:
     parser.add_argument(
         "--component",
         default="all",
-        choices=["all", "ffmpeg", "pdfium"],
+        choices=["all", "ffmpeg", "pdfium", "onnxruntime"],
         help="Which component(s) to fetch",
     )
     args = parser.parse_args()
@@ -251,6 +319,8 @@ def main() -> int:
                 fetch_pdfium(sub_target, sub_dir)
             if args.component in ("all", "ffmpeg"):
                 fetch_ffmpeg(sub_target, sub_dir)
+            if args.component in ("all", "onnxruntime"):
+                fetch_onnxruntime(sub_target, sub_dir)
         uni_dir.mkdir(parents=True, exist_ok=True)
         if shutil.which("lipo"):
             if args.component in ("all", "ffmpeg"):
@@ -278,6 +348,19 @@ def main() -> int:
                         str(uni_dir / "pdfium" / "lib" / "libpdfium.dylib"),
                     ]
                 )
+            if args.component in ("all", "onnxruntime"):
+                (uni_dir / "onnxruntime" / "lib").mkdir(parents=True, exist_ok=True)
+                subprocess.check_call(
+                    [
+                        "lipo",
+                        "-create",
+                        str(arm_dir / "onnxruntime" / "lib" / "libonnxruntime.dylib"),
+                        str(x64_dir / "onnxruntime" / "lib" / "libonnxruntime.dylib"),
+                        "-output",
+                        str(uni_dir / "onnxruntime" / "lib" / "libonnxruntime.dylib"),
+                    ]
+                )
+                make_executable(uni_dir / "onnxruntime" / "lib" / "libonnxruntime.dylib")
         return 0
 
     out_dir = Path(args.out_dir) if args.out_dir else (repo_root / "vendor" / args.target)
@@ -286,6 +369,8 @@ def main() -> int:
         fetch_pdfium(args.target, out_dir)
     if args.component in ("all", "ffmpeg"):
         fetch_ffmpeg(args.target, out_dir)
+    if args.component in ("all", "onnxruntime"):
+        fetch_onnxruntime(args.target, out_dir)
     return 0
 
 

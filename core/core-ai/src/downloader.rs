@@ -626,12 +626,13 @@ pub struct AiModelsCatalogPayload {
     pub flagged_excluded: Vec<crate::manifest::FlaggedNonCommercialModel>,
 }
 
-/// Coordinates active model directory, device preference, concurrent downloads, and event broadcasts.
+/// Coordinates active model directory, device preference, lazy ONNX sessions, concurrent downloads, and event broadcasts.
 pub struct AiRuntimeHub {
     custom_models_dir: RwLock<Option<PathBuf>>,
     fallback_models_dir: RwLock<PathBuf>,
     device_pref: RwLock<AiDevicePreference>,
     manifest: ModelsManifest,
+    sessions: crate::runtime::SessionPool,
     downloads: RwLock<HashMap<String, LiveDownloadEntry>>,
     events_tx: broadcast::Sender<String>,
     recent_errors: RwLock<VecDeque<(String, String)>>,
@@ -646,10 +647,19 @@ impl AiRuntimeHub {
             fallback_models_dir: RwLock::new(default_dir),
             device_pref: RwLock::new(AiDevicePreference::Auto),
             manifest,
+            sessions: crate::runtime::SessionPool::default(),
             downloads: RwLock::new(HashMap::new()),
             events_tx,
             recent_errors: RwLock::new(VecDeque::new()),
         })
+    }
+
+    pub fn sessions(&self) -> &crate::runtime::SessionPool {
+        &self.sessions
+    }
+
+    pub fn evict_idle_sessions(&self) -> usize {
+        self.sessions.evict_idle_older_than(Duration::from_secs(60))
     }
 
     pub fn update_default_dir_if_unset(&self, default_dir: &Path) {
@@ -682,6 +692,7 @@ impl AiRuntimeHub {
         if let Ok(mut guard) = self.custom_models_dir.write() {
             *guard = custom;
         }
+        self.sessions.clear_all();
         let eff = self.effective_models_dir();
         self.broadcast_catalog();
         Ok(eff)
@@ -698,22 +709,12 @@ impl AiRuntimeHub {
         if let Ok(mut guard) = self.device_pref.write() {
             *guard = pref;
         }
+        self.sessions.clear_all();
         self.broadcast_catalog();
     }
 
     pub fn detected_execution_providers(&self) -> Vec<String> {
-        let mut providers = vec!["cpu".to_string()];
-        if cfg!(target_os = "macos") {
-            providers.push("coreml".to_string());
-        }
-        if cfg!(target_os = "windows") {
-            providers.push("directml".to_string());
-            providers.push("cuda".to_string());
-        }
-        if cfg!(target_os = "linux") {
-            providers.push("cuda".to_string());
-        }
-        providers
+        crate::runtime::query_available_providers(false)
     }
 
     pub fn settings_snapshot(&self) -> AiSettingsSnapshot {

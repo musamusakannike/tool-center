@@ -3,6 +3,8 @@
 
 pub mod downloader;
 pub mod manifest;
+pub mod onnx_fixture;
+pub mod runtime;
 
 pub use downloader::{
     sha256_file_streamed, AiModelsCatalogPayload, AiRuntimeHub, AiSettingsSnapshot,
@@ -14,11 +16,15 @@ pub use manifest::{
     FlaggedNonCommercialModel, ModelFileEntry, ModelInstallState, ModelsManifest,
     EMBEDDED_MODELS_JSON,
 };
+pub use runtime::{
+    ensure_ort_environment, locate_onnxruntime_dylib, query_available_providers,
+    ActiveProviderInfo, OrtSessionHandle, SessionPool,
+};
 
 use core_jobs::{CancelHandle, ToolError};
 use std::path::Path;
 
-/// Trait boundary for an ONNX Runtime (`ort`) execution session (implemented in Milestone 2).
+/// Trait boundary for an ONNX Runtime (`ort`) execution session.
 pub trait OnnxInferenceSession: Send + Sync {
     fn model_id(&self) -> &str;
     fn run_nchw_f32(
@@ -45,6 +51,7 @@ mod tests {
     use std::fs;
     use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
     use tempfile::tempdir;
 
     fn sha256_bytes(bytes: &[u8]) -> String {
@@ -276,5 +283,73 @@ mod tests {
         // Delete removes installed directory cleanly
         assert!(mgr.delete_model("upscale.test_import").unwrap());
         assert!(!mgr.list_models()[0].installed);
+    }
+
+    #[test]
+    fn ort_dynamic_runtime_executes_tiny_fixtures_falls_back_to_cpu_and_evicts_idle_sessions() {
+        let dir = tempdir().unwrap();
+
+        // 1. Write tiny ~200-byte synthetic ONNX fixtures to disk (zero network!)
+        let mul_path = dir.path().join("mul3.onnx");
+        let mat_path = dir.path().join("matting.onnx");
+        let up2_path = dir.path().join("upscale2x.onnx");
+        fs::write(&mul_path, onnx_fixture::build_tiny_mul_onnx(3.0)).unwrap();
+        fs::write(&mat_path, onnx_fixture::build_tiny_matting_onnx()).unwrap();
+        fs::write(&up2_path, onnx_fixture::build_tiny_upscale_onnx(2)).unwrap();
+
+        let pool = SessionPool::new(Duration::from_secs(60));
+        assert_eq!(pool.cached_count(), 0, "Pool starts completely empty");
+
+        // 2. Request CUDA explicitly (unavailable in CPU CI) -> must fall back cleanly to CPU without crashing!
+        let sess = pool
+            .get_or_load("fixture.mul3", &mul_path, AiDevicePreference::Cuda)
+            .unwrap();
+        assert_eq!(sess.provider_info().active_provider, "cpu");
+        assert!(sess.provider_info().fell_back_to_cpu);
+        assert_eq!(pool.cached_count(), 1);
+
+        let (shape, out) = sess
+            .run_f32_tensor(&[1, 1, 2, 2], &[1.0, 2.0, 3.0, 4.0], &CancelHandle::new())
+            .unwrap();
+        assert_eq!(shape, vec![1, 1, 2, 2]);
+        assert_eq!(out, vec![3.0, 6.0, 9.0, 12.0]);
+
+        // 3. Matting fixture (`[1, 3, 4, 4]` -> `[1, 1, 4, 4]` in `[0..1]`)
+        let mat_sess = pool
+            .get_or_load("fixture.matting", &mat_path, AiDevicePreference::Auto)
+            .unwrap();
+        let (m_shape, m_out) = mat_sess
+            .run_f32_tensor(&[1, 3, 4, 4], &[0.0f32; 48], &CancelHandle::new())
+            .unwrap();
+        assert_eq!(m_shape, vec![1, 1, 4, 4]);
+        assert!((m_out[0] - 0.5).abs() < 1e-4, "Sigmoid(0.0) == 0.5");
+
+        // 4. Upscale 2x fixture (`[1, 3, 4, 4]` -> `[1, 3, 8, 8]`)
+        let up_sess = pool
+            .get_or_load("fixture.up2", &up2_path, AiDevicePreference::Cpu)
+            .unwrap();
+        let (u_shape, u_out) = up_sess
+            .run_f32_tensor(&[1, 3, 4, 4], &[0.75f32; 48], &CancelHandle::new())
+            .unwrap();
+        assert_eq!(u_shape, vec![1, 3, 8, 8]);
+        assert_eq!(u_out.len(), 192);
+        assert!((u_out[0] - 0.75).abs() < 1e-5);
+
+        // 5. Cancellation check returns Err(ToolError::Cancelled)
+        let cancelled = CancelHandle::new();
+        cancelled.cancel();
+        assert!(matches!(
+            up_sess.run_f32_tensor(&[1, 3, 4, 4], &[0.0f32; 48], &cancelled),
+            Err(ToolError::Cancelled)
+        ));
+
+        // 6. Drop strong leases and evict idle sessions -> memory released!
+        drop(sess);
+        drop(mat_sess);
+        drop(up_sess);
+        std::thread::sleep(Duration::from_millis(5));
+        let evicted = pool.evict_idle_older_than(Duration::from_millis(1));
+        assert_eq!(evicted, 3);
+        assert_eq!(pool.cached_count(), 0);
     }
 }
