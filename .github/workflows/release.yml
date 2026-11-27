@@ -1,0 +1,315 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release version tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Package Linux (AppImage + .deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libmpv-dev mpv \
+            file fuse libfuse2t64 desktop-file-utils fakeroot
+
+      - name: Fetch & verify LGPL FFmpeg + PDFium (SHA-256 + LGPL check)
+        run: python3 scripts/fetch_vendor.py --target linux-x64
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Build Rust bridge (release)
+        working-directory: core
+        run: cargo build -p bridge --release
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter Linux release
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter gen-l10n
+          flutter build linux --release
+
+      - name: Package .deb and AppImage
+        run: |
+          VERSION="${{ github.event.inputs.tag || github.ref_name }}"
+          chmod +x scripts/package_linux.sh
+          ./scripts/package_linux.sh "${VERSION}"
+          rm -f dist/appimagetool-x86_64.AppImage
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+
+  build-macos:
+    name: Package macOS Universal (.dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch & verify universal LGPL FFmpeg + PDFium
+        run: python3 scripts/fetch_vendor.py --target macos-universal
+
+      - name: Set up Rust (arm64 + x86_64)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Build universal libbridge.dylib
+        working-directory: core
+        run: |
+          cargo build -p bridge --release --target aarch64-apple-darwin
+          cargo build -p bridge --release --target x86_64-apple-darwin
+          mkdir -p target/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/libbridge.dylib \
+            target/x86_64-apple-darwin/release/libbridge.dylib \
+            -output target/release/libbridge.dylib
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter macOS release & embed universal binaries
+        run: |
+          cd app
+          flutter pub get
+          flutter gen-l10n
+          flutter build macos --release
+          cd ..
+
+          APP_BUNDLE="app/build/macos/Build/Products/Release/tool_center.app"
+          mkdir -p "${APP_BUNDLE}/Contents/Frameworks" "${APP_BUNDLE}/Contents/Resources"
+          cp core/target/release/libbridge.dylib "${APP_BUNDLE}/Contents/Frameworks/"
+          cp vendor/macos-universal/pdfium/lib/libpdfium.dylib "${APP_BUNDLE}/Contents/Frameworks/"
+          cp -R vendor/macos-universal/ffmpeg "${APP_BUNDLE}/Contents/Resources/ffmpeg"
+
+      - name: Optional Apple Developer ID Code Signing
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          APP_BUNDLE="app/build/macos/Build/Products/Release/tool_center.app"
+          if [[ -n "${APPLE_CERTIFICATE_BASE64}" && -n "${APPLE_SIGNING_IDENTITY}" ]]; then
+            echo "Signing macOS bundle with Developer ID..."
+            KEYCHAIN_PW="$(uuidgen)"
+            security create-keychain -p "${KEYCHAIN_PW}" build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p "${KEYCHAIN_PW}" build.keychain
+            echo "${APPLE_CERTIFICATE_BASE64}" | base64 --decode > cert.p12
+            security import cert.p12 -k build.keychain -P "${APPLE_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PW}" build.keychain
+            rm -f cert.p12
+            codesign --force --options runtime --timestamp --sign "${APPLE_SIGNING_IDENTITY}" \
+              "${APP_BUNDLE}/Contents/Resources/ffmpeg/bin/ffmpeg"
+            codesign --force --options runtime --timestamp --sign "${APPLE_SIGNING_IDENTITY}" \
+              "${APP_BUNDLE}/Contents/Frameworks/libpdfium.dylib"
+            codesign --force --options runtime --timestamp --sign "${APPLE_SIGNING_IDENTITY}" \
+              "${APP_BUNDLE}/Contents/Frameworks/libbridge.dylib"
+            codesign --deep --force --options runtime --timestamp \
+              --entitlements app/macos/Runner/Release.entitlements \
+              --sign "${APPLE_SIGNING_IDENTITY}" "${APP_BUNDLE}"
+          else
+            echo "Apple signing secrets not configured; performing ad-hoc local signature so unsigned build runs cleanly."
+            codesign --force --deep --sign - "${APP_BUNDLE}"
+          fi
+
+      - name: Create Universal .dmg
+        run: |
+          VERSION="${{ github.event.inputs.tag || github.ref_name }}"
+          CLEAN_VERSION="${VERSION#v}"
+          mkdir -p dist dmg_stage
+          cp -R "app/build/macos/Build/Products/Release/tool_center.app" "dmg_stage/Tool Center.app"
+          ln -s /Applications dmg_stage/Applications
+          DMG_OUT="dist/Tool-Center-${CLEAN_VERSION}-macos-universal.dmg"
+          hdiutil create -volname "Tool Center" -srcfolder dmg_stage -ov -format UDZO "${DMG_OUT}"
+          rm -rf dmg_stage
+
+      - name: Optional Apple Notarization
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [[ -n "${APPLE_ID}" && -n "${APPLE_TEAM_ID}" && -n "${APPLE_APP_SPECIFIC_PASSWORD}" && -n "${APPLE_SIGNING_IDENTITY}" ]]; then
+            DMG_FILE=$(ls dist/*.dmg | head -n 1)
+            xcrun notarytool submit "${DMG_FILE}" \
+              --apple-id "${APPLE_ID}" \
+              --team-id "${APPLE_TEAM_ID}" \
+              --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+              --wait
+            xcrun stapler staple "${DMG_FILE}"
+          else
+            echo "Skipping notarization (secrets not configured)."
+          fi
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist/*.dmg
+
+  build-windows:
+    name: Package Windows (Installer + Portable ZIP)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch & verify LGPL FFmpeg + PDFium
+        run: python scripts/fetch_vendor.py --target windows-x64
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Build Rust bridge.dll (release)
+        working-directory: core
+        run: cargo build -p bridge --release
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter Windows release
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter gen-l10n
+          flutter build windows --release
+
+      - name: Optional Windows Authenticode Signing (Pre-package)
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ($env:WINDOWS_CERT_PFX_BASE64 -and $env:WINDOWS_CERT_PASSWORD) {
+            [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+            $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+            & $signtool.FullName sign /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+              "app\build\windows\x64\runner\Release\tool_center.exe" `
+              "app\build\windows\x64\runner\Release\bridge.dll"
+            Remove-Item cert.pfx -Force
+          } else {
+            Write-Host "Windows code-signing secrets not present; proceeding with unsigned build."
+          }
+
+      - name: Build Portable ZIP & Inno Setup Installer
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $rawTag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $ver = $rawTag.TrimStart('v')
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          $bundleDir = Resolve-Path "app\build\windows\x64\runner\Release"
+          $zipOut = Join-Path (Resolve-Path "dist") "Tool-Center-$ver-windows-x64-portable.zip"
+          Compress-Archive -Path "$bundleDir\*" -DestinationPath $zipOut -Force
+
+          $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+          if ($isccCmd) {
+            $isccPath = $isccCmd.Source
+          } elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+            $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          } else {
+            choco install innosetup -y --no-progress
+            $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          & $isccPath "/DAppVersion=$ver" "scripts\packaging\windows\installer.iss"
+
+          if ($env:WINDOWS_CERT_PFX_BASE64 -and $env:WINDOWS_CERT_PASSWORD) {
+            [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+            $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+            $setupExe = Get-ChildItem "dist\*-setup.exe" | Select-Object -First 1
+            & $signtool.FullName sign /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $setupExe.FullName
+            Remove-Item cert.pfx -Force
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+
+  publish-release:
+    name: Create Draft GitHub Release + SHA256SUMS
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate SHA-256 Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload to Draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" artifacts/* --clobber
+          else
+            gh release create "${TAG}" artifacts/* \
+              --draft \
+              --generate-notes \
+              --title "Tool Center ${TAG}"
+          fi

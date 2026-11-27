@@ -1,0 +1,9 @@
+version: 2
+
+secret:
+  ignored_paths:
+    - "**/tests/**"
+    - "core/core-pdf/src/lib.rs"
+  ignored_matches:
+    - name: "lopdf EncryptionVersion::V5 struct variable binding (not a secret)"
+      match: "eff_owner"

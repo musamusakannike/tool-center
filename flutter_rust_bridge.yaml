@@ -1,0 +1,5 @@
+rust_input: crate::api
+rust_root: core/bridge/
+dart_output: app/lib/src/rust/
+c_output: app/macos/Runner/bridge_generated.h
+stop_on_error: true
