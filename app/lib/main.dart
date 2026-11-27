@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'
     hide GlobalMaterialLocalizations, GlobalCupertinoLocalizations;
@@ -96,6 +97,14 @@ class _ToolCenterShell extends StatelessWidget {
     }
   }
 
+  Future<void> _openFileForPreview() async {
+    final file = await FilePicker.pickFile();
+    final path = file?.path;
+    if (path != null && path.isNotEmpty) {
+      controller.openPreview(path);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -108,6 +117,14 @@ class _ToolCenterShell extends StatelessWidget {
             _OpenPaletteIntent(),
         SingleActivator(LogicalKeyboardKey.keyK, meta: true):
             _OpenPaletteIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, control: true):
+            _OpenFilePreviewIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, meta: true):
+            _OpenFilePreviewIntent(),
+        SingleActivator(LogicalKeyboardKey.keyJ, control: true):
+            _ToggleJobsIntent(),
+        SingleActivator(LogicalKeyboardKey.keyJ, meta: true):
+            _ToggleJobsIntent(),
         SingleActivator(LogicalKeyboardKey.escape): _GoHomeIntent(),
       },
       child: Actions(
@@ -115,6 +132,18 @@ class _ToolCenterShell extends StatelessWidget {
           _OpenPaletteIntent: CallbackAction<_OpenPaletteIntent>(
             onInvoke: (_) {
               _openPalette(context);
+              return null;
+            },
+          ),
+          _OpenFilePreviewIntent: CallbackAction<_OpenFilePreviewIntent>(
+            onInvoke: (_) {
+              _openFileForPreview();
+              return null;
+            },
+          ),
+          _ToggleJobsIntent: CallbackAction<_ToggleJobsIntent>(
+            onInvoke: (_) {
+              controller.toggleJobsDrawer();
               return null;
             },
           ),
@@ -133,27 +162,31 @@ class _ToolCenterShell extends StatelessWidget {
           child: Scaffold(
             appBar: AppBar(
               titleSpacing: 20,
-              title: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: controller.goHome,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.handyman_rounded,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        l10n.appTitle,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    ],
+              title: Semantics(
+                button: true,
+                label: l10n.appTitle,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: controller.goHome,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 4,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.handyman_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          l10n.appTitle,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -179,7 +212,7 @@ class _ToolCenterShell extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Command Palette (Ctrl+K)',
+                  tooltip: 'Command Palette (Ctrl+K / Cmd+K)',
                   icon: const Icon(Icons.terminal_rounded),
                   onPressed: () => _openPalette(context),
                 ),
@@ -195,7 +228,7 @@ class _ToolCenterShell extends StatelessWidget {
                   isLabelVisible: activeCount > 0,
                   label: Text('$activeCount'),
                   child: IconButton(
-                    tooltip: l10n.jobsPanelTitle,
+                    tooltip: '${l10n.jobsPanelTitle} (Ctrl+J)',
                     icon: const Icon(Icons.bolt_rounded),
                     onPressed: controller.toggleJobsDrawer,
                   ),
@@ -245,6 +278,14 @@ class _ToolCenterShell extends StatelessWidget {
 
 class _OpenPaletteIntent extends Intent {
   const _OpenPaletteIntent();
+}
+
+class _OpenFilePreviewIntent extends Intent {
+  const _OpenFilePreviewIntent();
+}
+
+class _ToggleJobsIntent extends Intent {
+  const _ToggleJobsIntent();
 }
 
 class _GoHomeIntent extends Intent {

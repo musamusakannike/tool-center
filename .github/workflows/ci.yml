@@ -42,6 +42,14 @@ jobs:
             libmpv-dev \
             mpv
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch & verify pinned LGPL FFmpeg and PDFium binaries
+        run: python scripts/fetch_vendor.py
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -80,11 +88,7 @@ jobs:
 
       - name: Generate Flutter localization files
         working-directory: app
-        run: |
-          if [ -f l10n.yaml ]; then
-            flutter gen-l10n
-          fi
-        shell: bash
+        run: flutter gen-l10n
 
       - name: Analyze Flutter app
         working-directory: app
@@ -97,3 +101,13 @@ jobs:
       - name: Build Flutter desktop app (${{ matrix.flutter_target }})
         working-directory: app
         run: flutter build ${{ matrix.flutter_target }} --release
+
+      - name: Bundle Rust & vendor libraries into macOS app
+        if: runner.os == 'macOS'
+        run: |
+          APP_BUNDLE="app/build/macos/Build/Products/Release/tool_center.app"
+          mkdir -p "${APP_BUNDLE}/Contents/Frameworks" "${APP_BUNDLE}/Contents/Resources"
+          cp core/target/release/libbridge.dylib "${APP_BUNDLE}/Contents/Frameworks/"
+          VENDOR_MAC=$(ls -d vendor/macos-* | head -n 1)
+          cp "${VENDOR_MAC}/pdfium/lib/libpdfium.dylib" "${APP_BUNDLE}/Contents/Frameworks/"
+          cp -R "${VENDOR_MAC}/ffmpeg" "${APP_BUNDLE}/Contents/Resources/ffmpeg"

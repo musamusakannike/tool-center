@@ -12,7 +12,7 @@ static ENGINE: OnceLock<EngineState> = OnceLock::new();
 pub fn engine() -> &'static EngineState {
     ENGINE.get_or_init(|| {
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(4)
+            .worker_threads(2)
             .enable_all()
             .thread_name("tool-center-worker")
             .build()

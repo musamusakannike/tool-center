@@ -185,9 +185,33 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_core_version_and_empty_jobs() {
+    fn test_core_version_and_full_tool_registry_schemas() {
         assert_eq!(core_version(), "0.1.0");
-        assert!(list_tools_json().starts_with('['));
+        let tools_raw = list_tools_json();
+        let tools: Vec<serde_json::Value> = serde_json::from_str(&tools_raw).unwrap();
+        assert_eq!(tools.len(), 38, "Expected all 38 v1 tools to be registered");
+
+        for cat in ["images", "video", "audio", "pdf", "files", "convert"] {
+            assert!(
+                tools.iter().any(|t| t["category"] == cat),
+                "Missing tools in category {cat}"
+            );
+        }
+
+        // Every option across every tool must carry a non-empty plain-language label and hint
+        for tool in &tools {
+            let id = tool["id"].as_str().unwrap_or("");
+            for opt in tool["options_schema"].as_array().unwrap() {
+                assert!(
+                    !opt["label"].as_str().unwrap_or("").trim().is_empty(),
+                    "Tool {id} has an option with an empty label"
+                );
+                assert!(
+                    !opt["hint"].as_str().unwrap_or("").trim().is_empty(),
+                    "Tool {id} has an option with an empty hint"
+                );
+            }
+        }
         assert!(list_jobs_json().starts_with('['));
     }
 
