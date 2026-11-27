@@ -106,3 +106,22 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Bundle Rust bridge DLL when built
+set(RUST_BRIDGE_WIN_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/../../core/target/release/bridge.dll")
+set(RUST_BRIDGE_WIN_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/../../core/target/debug/bridge.dll")
+if(EXISTS "${RUST_BRIDGE_WIN_RELEASE}")
+  install(FILES "${RUST_BRIDGE_WIN_RELEASE}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+elseif(EXISTS "${RUST_BRIDGE_WIN_DEBUG}")
+  install(FILES "${RUST_BRIDGE_WIN_DEBUG}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+
+# Bundle fetched PDFium & LGPL FFmpeg sidecar when present in vendor/windows-x64
+set(VENDOR_WIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/windows-x64")
+if(EXISTS "${VENDOR_WIN_DIR}/pdfium/bin/pdfium.dll")
+  install(FILES "${VENDOR_WIN_DIR}/pdfium/bin/pdfium.dll" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+if(EXISTS "${VENDOR_WIN_DIR}/ffmpeg")
+  install(DIRECTORY "${VENDOR_WIN_DIR}/ffmpeg" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+endif()
+

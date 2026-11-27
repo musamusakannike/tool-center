@@ -7,3 +7,13 @@ repository.workspace = true
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+[dependencies]
+core-jobs = { path = "../core-jobs" }
+core-ai = { path = "../core-ai" }
+flutter_rust_bridge = "=2.13.0"
+serde_json.workspace = true
+tokio.workspace = true

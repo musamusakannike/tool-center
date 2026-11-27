@@ -126,3 +126,22 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Bundle Rust bridge shared library (release preferred, debug fallback)
+set(RUST_BRIDGE_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/../../core/target/release/libbridge.so")
+set(RUST_BRIDGE_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/../../core/target/debug/libbridge.so")
+if(EXISTS "${RUST_BRIDGE_RELEASE}")
+  install(FILES "${RUST_BRIDGE_RELEASE}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+elseif(EXISTS "${RUST_BRIDGE_DEBUG}")
+  install(FILES "${RUST_BRIDGE_DEBUG}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+
+# Bundle fetched PDFium & LGPL FFmpeg sidecar when present in vendor/
+set(VENDOR_LINUX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/linux-x64")
+if(EXISTS "${VENDOR_LINUX_DIR}/pdfium/lib/libpdfium.so")
+  install(FILES "${VENDOR_LINUX_DIR}/pdfium/lib/libpdfium.so" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+if(EXISTS "${VENDOR_LINUX_DIR}/ffmpeg")
+  install(DIRECTORY "${VENDOR_LINUX_DIR}/ffmpeg" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" USE_SOURCE_PERMISSIONS COMPONENT Runtime)
+endif()
+
